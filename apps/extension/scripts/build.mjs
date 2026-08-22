@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 
 const here=dirname(fileURLToPath(import.meta.url));
 const root=resolve(here,'..');
+const repoRoot=resolve(root,'../..');
 const dist=resolve(root,'dist');
 await rm(dist,{recursive:true,force:true});
 const bin=process.platform==='win32'?'tsc.cmd':'tsc';
@@ -14,4 +15,6 @@ await mkdir(dist,{recursive:true});
 for(const entry of await readdir(resolve(root,'public'),{withFileTypes:true})){
   await cp(resolve(root,'public',entry.name),resolve(dist,entry.name),{recursive:true});
 }
+await mkdir(resolve(dist,'icons'),{recursive:true});
+await cp(resolve(repoRoot,'assets/branding/selfrelay-logo.png'),resolve(dist,'icons/selfrelay-logo.png'));
 console.log(`SelfRelay extension built: ${dist}`);
