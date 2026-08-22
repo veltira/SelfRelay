@@ -29,7 +29,7 @@ The current extension includes:
 
 ## Validation
 
-`npm run check` is the merge gate and runs:
+`npm run check` is the developer/CI merge gate and runs:
 
 1. shared TypeScript build;
 2. extension typecheck;
@@ -40,9 +40,19 @@ The extension suite contains 20 automated tests covering URL/scope parity, norma
 
 Physical Chrome validation remains separate and is documented in `docs/MANUAL_CHROME_VALIDATION.md`. Automated tests must not be described as a completed real-browser E2E.
 
+## Distribution
+
+Distribution requirements are defined in `docs/DISTRIBUTION.md`.
+
+A non-developer must never be required to install Node.js/npm/TypeScript/Git or compile SelfRelay. The Chrome deliverable is `SelfRelay-Chrome.zip`, containing the compiled extension directly.
+
+`.github/workflows/package.yml` runs the full extension check, validates the compiled package layout, and creates the user-ready Chrome ZIP automatically. Pull requests and `main` builds produce a validation artifact. Version tags matching `v*` publish the same ZIP to GitHub Releases.
+
+Desktop must ultimately ship as a normal installer, with `SelfRelay-Setup.exe` as the primary Windows target.
+
 ## Next priorities after manual validation
 
-1. Run the manual Chrome checklist against `apps/extension/dist`.
+1. Run the manual Chrome checklist using the packaged `SelfRelay-Chrome.zip`.
 2. If that passes, proceed to local audio checkpoints.
 3. Then build the mandatory Desktop MVP.
 4. Align Extension/Desktop behavior and design language.
