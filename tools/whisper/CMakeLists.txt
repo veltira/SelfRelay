@@ -12,6 +12,8 @@ target_link_options(selfrelay-whisper PRIVATE
   "-sMAXIMUM_MEMORY=536870912"
   "-sFILESYSTEM=1"
   "-sENVIRONMENT=worker"
+  "-sDYNAMIC_EXECUTION=0"
+  "-sEMBIND_AOT=1"
   "-sEXPORTED_RUNTIME_METHODS=['FS_createDataFile','FS_unlink']"
 )
 set_target_properties(selfrelay-whisper PROPERTIES SUFFIX ".js")
