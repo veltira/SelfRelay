@@ -1,0 +1,19 @@
+{
+  "name": "selfrelay",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build:shared": "npm run build -w @selfrelay/shared",
+    "typecheck": "npm run build:shared && npm run typecheck -w @selfrelay/extension",
+    "test": "npm run build:shared && npm run test -w @selfrelay/extension",
+    "build": "npm run build:shared && npm run build -w @selfrelay/extension",
+    "check": "npm run build:shared && npm run typecheck -w @selfrelay/extension && npm run test -w @selfrelay/extension && npm run build -w @selfrelay/extension"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.322",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "engines": {"node": ">=20"}
+}
