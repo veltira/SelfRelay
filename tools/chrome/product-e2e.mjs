@@ -71,7 +71,9 @@ try{
   await popup.locator('#addTabsEmpty').click();await popup.locator('#tabPicker').waitFor({state:'visible'});await checkPickerRow(popup,'Trabajo uno');
   const oneTabId=await serviceWorker.evaluate(url=>new Promise(resolve=>chrome.tabs.query({},tabs=>resolve(tabs.find(tab=>tab.url===url)?.id??null))),urlFor('one'));
   if(!oneTabId)throw new Error('active_fixture_tab_missing');await serviceWorker.evaluate(id=>chrome.tabs.remove(id),oneTabId);
-  await popup.locator('#saveTabs').click();await popup.locator('#popupStatus').waitFor({state:'visible'});const errorText=(await popup.locator('#popupStatus').textContent())?.trim()||'';if(!errorText.includes('No se pudo guardar'))throw new Error(`real_error_not_surface:${errorText}`);
+  await popup.locator('#saveTabs').click();
+  await popup.waitForFunction(()=>document.querySelector('#popupStatus')?.textContent?.includes('No se pudo guardar'),null,{timeout:10000});
+  const errorText=(await popup.locator('#popupStatus').textContent())?.trim()||'';if(!errorText.includes('No se pudo guardar'))throw new Error(`real_error_not_surface:${errorText}`);
   await assertEnabled(popup,'#saveTabs','save_released_after_error');await assertEnabled(popup,'#closePicker','close_released_after_error');
   await popup.locator('#closePicker').click();
 
