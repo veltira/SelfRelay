@@ -27,7 +27,9 @@ std::string transcribe(emscripten::val input, const std::string & language, int 
     emscripten::val view = emscripten::val(emscripten::typed_memory_view(length, pcm.data()));
     view.call<void>("set", input);
 
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    // Base-q5_1 has enough headroom for beam search in short checkpoint recordings.
+    // This is intentionally transcription-only: never translate spoken Spanish.
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
@@ -37,7 +39,11 @@ std::string transcribe(emscripten::val input, const std::string & language, int 
     params.single_segment = false;
     params.suppress_blank = true;
     params.suppress_nst = true;
+    params.token_timestamps = false;
+    params.temperature = 0.0f;
     params.n_threads = std::max(1, std::min(threads, 4));
+    params.beam_search.beam_size = 5;
+    params.beam_search.patience = 1.0f;
     params.language = language.empty() ? "es" : language.c_str();
 
     const int rc = whisper_full(g_ctx, params, pcm.data(), static_cast<int>(pcm.size()));

@@ -15,21 +15,34 @@ The preserved implementation in `artifacts/chrome-extension-unpacked/` remains a
 The current extension includes:
 
 - Chrome Extension Manifest V3 source/build pipeline.
-- Tracking by tab, exact URL, or site.
-- Minimal snapshots only for explicitly followed contexts.
-- Text checkpoint capture with discard/save paths.
-- Local audio checkpoints recorded only after explicit microphone action.
+- Backward-compatible legacy tracking by tab, exact URL, or site.
+- Explicit browser work contexts (worksets) composed of one or more user-selected supported tabs.
+- Workset members retain URL, title, favicon and stable order; internal/browser URLs are never added automatically.
+- Closing one member of a multi-tab context does not end the context while another member remains open.
+- Closing the last member generates one pending context checkpoint; window close and full-Chrome durable recovery reuse the hardened journal architecture.
+- Text and local audio checkpoints with discard/save paths.
 - Binary audio stored in IndexedDB rather than `chrome.storage.local`.
-- Local transcription: on-device Chrome recognition when it can explicitly guarantee `processLocally`, then a packaged Whisper.cpp/WASM multilingual fallback.
-- Automatic recovery of the latest unresolved checkpoint when returning to the matching context; transcript is primary when present and audio playback is secondary.
-- Resolve action and checkpoint history capability; resolution/deletion cleans the referenced binary asset without destructively migrating old text checkpoints.
-- Deterministic full-window deduplication: one interruption per context for one closing window.
-- A durable local exit journal written while tracked tabs are alive, so full-browser shutdown recovery does not depend solely on asynchronous work after Chrome has already exited.
-- Startup reconciliation of durable shutdown state into pending checkpoint captures.
-- One visible capture surface at a time; multiple legitimate pending items advance serially after save/discard.
-- SelfRelay branding, official extension icons and official master logo on product surfaces.
-- Redesigned compact popup, checkpoint composer and recovery surface using cold neutrals, navy, blue and cyan accents.
+- Audio saving is immediate: recording, stopping, saving, exiting and returning never start transcription.
+- Transcription starts only when the user explicitly selects `Transcribir audio` from recovery.
+- Local transcription uses the packaged Whisper.cpp/WASM runtime with multilingual `base-q5_1`; no browser speech service, API, token, backend or post-install model download is required.
+- Audio is decoded before Whisper, downmixed to mono, silence-trimmed, resampled to 16 kHz Float32 PCM and normalized conservatively.
+- Spanish uses an explicit `es` language hint and translation is disabled.
+- Successful transcripts are persisted on the existing checkpoint and remain editable; failure never removes the original audio and can be retried.
+- Checkpoints can target the entire workset (default), a subset of members, or one explicit member without duplicating checkpoint records.
+- A checkpoint targeted to one member outranks subset checkpoints, which outrank a general workset checkpoint on that page.
+- Recovery from any eligible workset member uses one surface at a time and can open only the missing supported tabs on explicit request.
+- Resolve action and checkpoint history remain available; resolution/deletion cleans referenced binary audio without destructively migrating older text checkpoints.
+- Deterministic full-window deduplication and the durable local exit journal remain in place.
+- Startup reconciliation of durable shutdown state remains idempotent.
+- SelfRelay branding and official icons remain packaged.
+- Popup, capture and recovery use a compact IBM Plex Sans interface built from neutral separators and restrained controls rather than nested cards/badges.
 - Local-first storage; no backend/sync dependency.
+
+## Transcription quality decision
+
+The previous `tiny-q5_1` fallback was physically reported as insufficient for Spanish. The new build packages multilingual `base-q5_1` and uses beam search for short checkpoints.
+
+The packaging job also performs a pinned real-Spanish speech smoke test. It runs both `tiny-q5_1` and `base-q5_1` against the same short WAV, logs both transcripts, checks Spanish keyword recall, requires the base result to reach the minimum quality gate, and requires it not to regress against tiny. The tiny model is downloaded only for this CI comparison and is never included in the release ZIP.
 
 ## Validation
 
@@ -40,9 +53,9 @@ The current extension includes:
 3. extension tests;
 4. extension unpacked build.
 
-The original shutdown/recovery test suite remains intact. Additional tests cover audio-only/text-only/mixed checkpoints, local transcript metadata, transcription failure preserving audio, playback routing, cleanup on resolve/delete and safe cleanup failure behavior, plus static assertions for the redesigned product surfaces.
+The original shutdown/recovery tests remain part of the suite. Additional coverage verifies workset creation/editing, last-tab exit semantics, window/shutdown recovery, general/subset/member-specific targeting, checkpoint specificity, missing-tab restoration, unsafe URL rejection, deferred/cached/retried transcription, PCM preparation and legacy audio cleanup behavior.
 
-The text/shutdown core was physically validated by the user from the packaged ZIP before this audio/UX phase. The new audio/UX build still requires physical browser validation after packaging; automated tests must not be described as a completed microphone/transcription E2E.
+The text/shutdown core was physically validated by the user from a packaged ZIP before this phase. The new multi-tab/transcription/UX build still requires physical browser validation after packaging; automated tests must not be described as a completed real-microphone Chrome E2E.
 
 ## Distribution
 
@@ -50,14 +63,14 @@ Distribution requirements are defined in `docs/DISTRIBUTION.md`.
 
 A non-developer must never be required to install Node.js/npm/TypeScript/Git or compile SelfRelay. The Chrome deliverable is `SelfRelay-Chrome.zip`, containing the compiled extension directly.
 
-`.github/workflows/package.yml` runs the full extension check, builds and pins the local Whisper.cpp/WASM fallback, verifies the multilingual `tiny-q5_1` model digest, validates the compiled package layout, and creates the user-ready Chrome ZIP automatically. Pull requests and `main` builds produce a validation artifact. Version tags matching `v*` publish the same ZIP to GitHub Releases.
+`.github/workflows/package.yml` installs the pinned IBM Plex assets, builds the pinned Whisper.cpp/WASM runtime, verifies multilingual `base-q5_1` by SHA-256, runs the Spanish quality smoke, runs the full extension check, validates fonts/offscreen/runtime/model assets and creates the user-ready Chrome ZIP. Pull requests and `main` builds produce a validation artifact. Version tags matching `v*` publish the same ZIP to GitHub Releases.
 
-Desktop must ultimately ship as a normal installer, with `SelfRelay-Setup.exe` as the primary Windows target.
+Desktop must ultimately ship as a normal installer, with `SelfRelay-Setup.exe` as the primary Windows deliverable.
 
 ## Next priorities
 
-1. Physically validate the packaged audio/UX extension in Chrome.
-2. Fix only concrete browser/audio bugs found by that validation.
+1. Physically validate this packaged workset/on-demand-transcription extension in Chrome.
+2. Fix only concrete browser/audio/workset bugs found by that validation.
 3. Then build the mandatory Desktop MVP.
 4. Align Extension/Desktop behavior and design language.
 
