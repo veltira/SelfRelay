@@ -1,64 +1,45 @@
 const ROOT_ID='checkpoint-recovery-root';
 void lookup();
 
+async function claimSurface(checkpointId:string){
+  return new Promise<chrome.runtime.Port|null>(resolve=>{
+    let settled=false;const port=chrome.runtime.connect({name:`selfrelay-recovery:${encodeURIComponent(checkpointId)}`});
+    const finish=(value:chrome.runtime.Port|null)=>{if(settled)return;settled=true;resolve(value);};
+    const timeout=window.setTimeout(()=>{try{port.disconnect();}catch{}finish(null);},1500);
+    port.onMessage.addListener(message=>{if(typeof message?.claimed!=='boolean')return;clearTimeout(timeout);if(message.claimed)finish(port);else finish(null);});
+    port.onDisconnect.addListener(()=>{clearTimeout(timeout);finish(null);});
+  });
+}
+
 async function lookup(){
   if(document.getElementById(ROOT_ID))return;
   let result:any;try{result=await chrome.runtime.sendMessage({type:'LOOKUP_CHECKPOINT',url:location.href});}catch{return;}
   if(!result?.checkpoint||!result?.context)return;
-  render(result);
+  const claim=await claimSurface(result.checkpoint.id);if(!claim)return;
+  render(result,claim);
 }
 
-function render(result:any){
-  const checkpoint=result.checkpoint;
-  const context=result.context;
-  const host=document.createElement('div');host.id=ROOT_ID;
+function render(result:any,claim:chrome.runtime.Port){
+  const checkpoint=result.checkpoint,context=result.context,host=document.createElement('div');host.id=ROOT_ID;
   host.style.cssText='all:initial;position:fixed;z-index:2147483647;right:16px;top:16px;width:min(372px,calc(100vw - 24px));font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#151a23;';
-  const shadow=host.attachShadow({mode:'open'});
-  const fontRegular=chrome.runtime.getURL('fonts/IBMPlexSans-Regular.woff2');
-  const fontMedium=chrome.runtime.getURL('fonts/IBMPlexSans-Medium.woff2');
+  const shadow=host.attachShadow({mode:'open'}),fontRegular=chrome.runtime.getURL('fonts/IBMPlexSans-Regular.woff2'),fontMedium=chrome.runtime.getURL('fonts/IBMPlexSans-Medium.woff2');
   shadow.innerHTML=`<style>
-    @font-face{font-family:"IBM Plex Sans";src:url("${fontRegular}") format("woff2");font-weight:400;font-style:normal;font-display:swap}
-    @font-face{font-family:"IBM Plex Sans";src:url("${fontMedium}") format("woff2");font-weight:500 700;font-style:normal;font-display:swap}
+    @font-face{font-family:"IBM Plex Sans";src:url("${fontRegular}") format("woff2");font-weight:400;font-style:normal;font-display:swap}@font-face{font-family:"IBM Plex Sans";src:url("${fontMedium}") format("woff2");font-weight:500 700;font-style:normal;font-display:swap}
     :host{all:initial}.panel{box-sizing:border-box;background:#fff;border:1px solid #cfd5de;border-radius:8px;box-shadow:0 8px 22px rgba(15,23,42,.13);color:#151a23;overflow:hidden}.head{display:flex;align-items:center;justify-content:space-between;height:38px;padding:0 12px;border-bottom:1px solid #e4e7ec}.brand{font-size:12px;font-weight:650;letter-spacing:-.01em}.context{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:#687384}.body{padding:12px}.label{font-size:10.5px;color:#687384;margin-bottom:5px}.text{white-space:pre-wrap;margin:0;font-size:13.5px;line-height:1.48;color:#202733}.typed{white-space:pre-wrap;margin:8px 0 0;padding-top:8px;border-top:1px solid #e7eaf0;font-size:11.5px;line-height:1.45;color:#697385}.media,.context-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.action{appearance:none;border:1px solid #c9d0da;background:#fff;color:#364152;border-radius:6px;padding:5px 8px;font:500 11.5px "IBM Plex Sans",sans-serif;cursor:pointer}.action:hover{background:#f5f7fa;border-color:#b7c0cd}.action svg{width:13px;height:13px;vertical-align:-2px;margin-right:4px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.transcript-editor{display:block;width:100%;min-height:68px;box-sizing:border-box;margin-top:8px;border:1px solid #cfd5de;border-radius:6px;padding:8px;background:#fff;color:#202733;font:400 13px/1.45 "IBM Plex Sans",sans-serif;resize:vertical}.save-edit{margin-top:6px}.meta{font-size:10px;color:#87909d;margin-top:10px}.status{font-size:10.5px;color:#687384;margin-top:7px}.status.error{color:#b42318}.foot{display:flex;justify-content:flex-end;gap:6px;padding:9px 12px;border-top:1px solid #e4e7ec;background:#fafbfc}.btn{appearance:none;min-height:29px;border:1px solid #c9d0da;background:#fff;color:#465164;border-radius:6px;padding:5px 9px;font:500 11.5px "IBM Plex Sans",sans-serif;cursor:pointer}.btn:hover{background:#f4f6f8}.primary{background:#2563eb;border-color:#2563eb;color:#fff}.primary:hover{background:#1d4ed8}.btn:focus-visible,.action:focus-visible,.transcript-editor:focus-visible{outline:2px solid #4f7ff0;outline-offset:2px}.spinner{display:inline-block;width:10px;height:10px;margin-right:5px;border:1.5px solid #c6ced9;border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:520px){:host{right:12px!important;top:12px!important;width:calc(100vw - 24px)!important}}
   </style><div class="panel" role="dialog" aria-label="Checkpoint pendiente de SelfRelay"><div class="head"><span class="brand">SelfRelay</span><span class="context"></span></div><div class="body"><div class="label">Al volver</div><div class="main-content"></div><div class="media"></div><div class="context-actions"></div><div class="meta"></div><div class="status" role="status"></div></div><div class="foot"><button class="btn" data-action="dismiss">Ahora no</button><button class="btn primary" data-action="resolve">Ya lo retomé</button></div></div>`;
   shadow.querySelector<HTMLElement>('.context')!.textContent=context.members?.length?`${context.members.length} pestañas`:new URL(location.href).hostname;
-  const main=shadow.querySelector<HTMLElement>('.main-content')!;
-  const media=shadow.querySelector<HTMLElement>('.media')!;
-  const contextActions=shadow.querySelector<HTMLElement>('.context-actions')!;
-  const status=shadow.querySelector<HTMLElement>('.status')!;
-  const transcript=String(checkpoint.transcript||'').trim();const typed=String(checkpoint.originalText||'').trim();
+  const main=shadow.querySelector<HTMLElement>('.main-content')!,media=shadow.querySelector<HTMLElement>('.media')!,contextActions=shadow.querySelector<HTMLElement>('.context-actions')!,status=shadow.querySelector<HTMLElement>('.status')!,transcript=String(checkpoint.transcript||'').trim(),typed=String(checkpoint.originalText||'').trim();
+  let claimOpen=true;const release=()=>{if(!claimOpen)return;claimOpen=false;try{claim.disconnect();}catch{}};claim.onDisconnect.addListener(()=>{claimOpen=false;if(host.isConnected)host.remove();});
 
-  function renderContent(currentTranscript:string){
-    main.innerHTML='';
-    if(currentTranscript){
-      const editor=document.createElement('textarea');editor.className='transcript-editor';editor.value=currentTranscript;editor.setAttribute('aria-label','Transcripción del checkpoint');main.append(editor);
-      const saveEdit=document.createElement('button');saveEdit.className='action save-edit';saveEdit.textContent='Guardar cambios';saveEdit.hidden=true;main.append(saveEdit);
-      editor.oninput=()=>{saveEdit.hidden=editor.value.trim()===currentTranscript.trim();};
-      saveEdit.onclick=async()=>{saveEdit.disabled=true;const response=await chrome.runtime.sendMessage({type:'UPDATE_CHECKPOINT_TRANSCRIPT',checkpointId:checkpoint.id,text:editor.value});if(response?.ok){currentTranscript=editor.value.trim();saveEdit.hidden=true;status.textContent='Transcripción actualizada.';}else{status.textContent='No se pudo guardar el cambio.';status.classList.add('error');}saveEdit.disabled=false;};
-      if(typed&&typed!==currentTranscript){const note=document.createElement('p');note.className='typed';note.textContent=typed;main.append(note);}
-    }else if(typed){const body=document.createElement('p');body.className='text';body.textContent=typed;main.append(body);}
-    else{const body=document.createElement('p');body.className='text';body.textContent='Dejaste un checkpoint de audio.';main.append(body);}
-  }
+  function renderContent(currentTranscript:string){main.innerHTML='';if(currentTranscript){const editor=document.createElement('textarea');editor.className='transcript-editor';editor.value=currentTranscript;editor.setAttribute('aria-label','Transcripción del checkpoint');main.append(editor);const saveEdit=document.createElement('button');saveEdit.className='action save-edit';saveEdit.textContent='Guardar cambios';saveEdit.hidden=true;main.append(saveEdit);editor.oninput=()=>{saveEdit.hidden=editor.value.trim()===currentTranscript.trim();};saveEdit.onclick=async()=>{saveEdit.disabled=true;const response=await chrome.runtime.sendMessage({type:'UPDATE_CHECKPOINT_TRANSCRIPT',checkpointId:checkpoint.id,text:editor.value});if(response?.ok){currentTranscript=editor.value.trim();saveEdit.hidden=true;status.textContent='Transcripción actualizada.';}else{status.textContent='No se pudo guardar el cambio.';status.classList.add('error');}saveEdit.disabled=false;};if(typed&&typed!==currentTranscript){const note=document.createElement('p');note.className='typed';note.textContent=typed;main.append(note);}}else if(typed){const body=document.createElement('p');body.className='text';body.textContent=typed;main.append(body);}else{const body=document.createElement('p');body.className='text';body.textContent='Dejaste un checkpoint de audio.';main.append(body);}}
   renderContent(transcript);
 
-  if(checkpoint.audioRef){
-    const listen=button('Escuchar','<path d="M9 6.5v11l9-5.5-9-5.5Z"/>');listen.onclick=async()=>{const response=await chrome.runtime.sendMessage({type:'OPEN_AUDIO_PLAYER',audioRef:checkpoint.audioRef});if(!response?.ok)setError('El audio no se pudo abrir.');};media.append(listen);
-    if(!transcript){
-      const transcribe=button('Transcribir audio','<path d="M4 7h16M4 12h12M4 17h9"/>');media.append(transcribe);
-      transcribe.onclick=async()=>{transcribe.disabled=true;status.classList.remove('error');let seconds=0;status.innerHTML='<span class="spinner"></span>Transcribiendo…';const timer=window.setInterval(()=>{seconds++;status.innerHTML=`<span class="spinner"></span>Transcribiendo… ${seconds}s`;},1000);try{const response=await chrome.runtime.sendMessage({type:'TRANSCRIBE_CHECKPOINT',checkpointId:checkpoint.id,language:navigator.language||'es'});if(!response?.ok)throw new Error('failed');checkpoint.transcript=response.checkpoint.transcript;checkpoint.transcriptionEngine=response.checkpoint.transcriptionEngine;renderContent(String(checkpoint.transcript||''));transcribe.remove();status.textContent='';}catch{setError('No se pudo transcribir.');transcribe.textContent='Intentar otra vez';transcribe.disabled=false;}finally{clearInterval(timer);}};
-    }
-  }
-
-  if(Array.isArray(context.members)&&context.members.length){void (async()=>{const state=await chrome.runtime.sendMessage({type:'GET_CONTEXT_TAB_STATE',contextId:context.id});const missing=Array.isArray(state?.missing)?state.missing:[];if(!missing.length)return;const restore=button(`Abrir ${missing.length} ${missing.length===1?'pestaña restante':'pestañas restantes'}`,'<path d="M12 5v14M5 12h14"/>');contextActions.append(restore);restore.onclick=async()=>{restore.disabled=true;const response=await chrome.runtime.sendMessage({type:'OPEN_MISSING_CONTEXT_TABS',contextId:context.id});if(response?.ok)restore.remove();else{restore.disabled=false;setError('No se pudieron abrir las pestañas.');}};})();}
-
+  if(checkpoint.audioRef){const listen=button('Escuchar','<path d="M9 6.5v11l9-5.5-9-5.5Z"/>');listen.onclick=async()=>{const response=await chrome.runtime.sendMessage({type:'OPEN_AUDIO_PLAYER',audioRef:checkpoint.audioRef});if(!response?.ok)setError('El audio no se pudo abrir.');};media.append(listen);if(!transcript){const transcribe=button('Transcribir audio','<path d="M4 7h16M4 12h12M4 17h9"/>');media.append(transcribe);transcribe.onclick=async()=>{transcribe.disabled=true;status.classList.remove('error');let seconds=0;status.innerHTML='<span class="spinner"></span>Transcribiendo…';const timer=window.setInterval(()=>{seconds++;status.innerHTML=`<span class="spinner"></span>Transcribiendo… ${seconds}s`;},1000);try{const response=await chrome.runtime.sendMessage({type:'TRANSCRIBE_CHECKPOINT',checkpointId:checkpoint.id,language:navigator.language||'es'});if(!response?.ok)throw new Error('failed');checkpoint.transcript=response.checkpoint.transcript;checkpoint.transcriptionEngine=response.checkpoint.transcriptionEngine;renderContent(String(checkpoint.transcript||''));transcribe.remove();status.textContent='';}catch{setError('No se pudo transcribir.');transcribe.textContent='Intentar otra vez';transcribe.disabled=false;}finally{clearInterval(timer);}};}}
+  if(Array.isArray(context.members)&&context.members.length){void(async()=>{const state=await chrome.runtime.sendMessage({type:'GET_CONTEXT_TAB_STATE',contextId:context.id}),missing=Array.isArray(state?.missing)?state.missing:[];if(!missing.length)return;const restore=button(`Abrir ${missing.length} ${missing.length===1?'pestaña restante':'pestañas restantes'}`,'<path d="M12 5v14M5 12h14"/>');contextActions.append(restore);restore.onclick=async()=>{restore.disabled=true;const response=await chrome.runtime.sendMessage({type:'OPEN_MISSING_CONTEXT_TABS',contextId:context.id});if(response?.ok)restore.remove();else{restore.disabled=false;setError('No se pudieron abrir las pestañas.');}};})();}
   shadow.querySelector<HTMLElement>('.meta')!.textContent=`Guardado ${formatDate(checkpoint.createdAt)}`;
-  shadow.querySelector<HTMLButtonElement>('[data-action="dismiss"]')!.onclick=()=>host.remove();
-  shadow.querySelector<HTMLButtonElement>('[data-action="resolve"]')!.onclick=async event=>{const resolveButton=event.currentTarget as HTMLButtonElement;resolveButton.disabled=true;const response=await chrome.runtime.sendMessage({type:'RESOLVE_CHECKPOINT',checkpointId:checkpoint.id});if(response?.ok){host.remove();window.setTimeout(()=>void lookup(),50);return;}resolveButton.disabled=false;setError('No se pudo cerrar el checkpoint.');};
+  shadow.querySelector<HTMLButtonElement>('[data-action="dismiss"]')!.onclick=()=>{release();host.remove();};
+  shadow.querySelector<HTMLButtonElement>('[data-action="resolve"]')!.onclick=async event=>{const resolveButton=event.currentTarget as HTMLButtonElement;resolveButton.disabled=true;const response=await chrome.runtime.sendMessage({type:'RESOLVE_CHECKPOINT',checkpointId:checkpoint.id});if(response?.ok){release();host.remove();window.setTimeout(()=>void lookup(),50);return;}resolveButton.disabled=false;setError('No se pudo cerrar el checkpoint.');};
   document.documentElement.append(host);
-
-  function setError(message:string){status.textContent=message;status.classList.add('error');}
-  function button(label:string,svg:string){const element=document.createElement('button');element.className='action';element.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>${escapeHtml(label)}`;return element;}
+  function setError(message:string){status.textContent=message;status.classList.add('error');}function button(label:string,svg:string){const element=document.createElement('button');element.className='action';element.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>${escapeHtml(label)}`;return element;}
 }
-
-function formatDate(raw:string){try{return new Intl.DateTimeFormat('es-UY',{dateStyle:'medium',timeStyle:'short'}).format(new Date(raw));}catch{return'';}}
-function escapeHtml(value:string){return String(value).replace(/[&<>'\"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]!));}
+function formatDate(raw:string){try{return new Intl.DateTimeFormat('es-UY',{dateStyle:'medium',timeStyle:'short'}).format(new Date(raw));}catch{return'';}}function escapeHtml(value:string){return String(value).replace(/[&<>'\"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]!));}
