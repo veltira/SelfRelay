@@ -5,8 +5,9 @@ const offscreen=chrome.offscreen as typeof chrome.offscreen&{hasDocument?:()=>Pr
 if(typeof offscreen.hasDocument!=='function'){
   offscreen.hasDocument=async()=>{
     const url=chrome.runtime.getURL('offscreen.html');
-    const contexts=await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT'],documentUrls:[url]});
-    return contexts.length>0;
+    const runtime=chrome.runtime as any;
+    const contexts=await runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT'],documentUrls:[url]}) as any[];
+    return Array.isArray(contexts)&&contexts.length>0;
   };
 }
 
