@@ -1,0 +1,51 @@
+.popup{width:370px}
+.popup-shell{min-height:0}
+.popup-body{padding:0 16px 13px}
+.current-context{padding:13px 1px 12px}
+.context-kicker{font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:#748196}
+.current-title{margin-top:4px;font-size:15.5px}
+.current-domain{margin-top:3px;font-size:11.2px}
+.empty-actions{padding-top:12px}
+.primary-context{min-height:40px;font-size:12.8px;border-radius:7px}
+.multitabs-action{display:flex;align-items:center;justify-content:flex-start;gap:9px;width:100%;min-height:39px;margin-top:8px;padding:8px 11px;color:#344054;text-align:left}
+.multitabs-action svg{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.section-heading{min-height:30px;margin-bottom:4px}
+.section-heading strong{font-size:11.8px;color:#344054}
+.add-control{font-size:11.4px;padding:5px 2px}
+.member-row{min-height:46px;padding:0 3px}
+.remove-member:disabled{opacity:.42}
+.disclosure{margin-top:9px;padding:9px 4px 7px}
+.simple-panel{padding:8px 3px 3px}
+.tab-picker{margin-top:10px;padding-top:11px}
+.picker-head strong{font-size:12.3px}
+.picker-row{min-height:45px}
+.picker-foot{padding-top:9px}
+.popup-status{margin-top:7px}
+
+.capture-shell{max-width:552px}
+.capture-body{padding:0 21px 18px}
+.capture-intro{padding:20px 0 14px}
+.capture-intro h1{font-size:24px}
+.context-meta{margin-top:6px;color:#68768a}
+.composer-block{margin-top:1px}
+.composer-label{display:block;margin:0 0 7px 1px;font-size:12px;font-weight:600;color:#344054}
+.composer textarea{min-height:124px;padding:12px 13px 11px;font-size:13.5px}
+.voice-action-row{height:auto;min-height:46px;padding:6px 8px;background:#fbfcfd}
+.voice-action{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:5px 8px 5px 6px;border:0;border-radius:7px;background:transparent;color:#334155;font-size:12.2px;font-weight:500;cursor:pointer;transition:background-color .13s ease,color .13s ease,transform .13s ease}
+.voice-action:hover:not(:disabled){background:#edf4ff;color:#174fae}
+.voice-action:active:not(:disabled){background:#e5efff;transform:translateY(1px)}
+.voice-action:focus-visible{outline:2px solid #5f8ff1;outline-offset:2px}
+.voice-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;background:#edf4ff;color:#2168f3;flex:none}
+.voice-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.recording-panel,.audio-review{margin-top:12px;padding:11px 12px;border:1px solid #d8dee7;border-radius:8px;background:#fff}
+.recording-line{font-size:11.8px}
+.inline-actions{margin-top:9px}
+.review-topline strong{font-size:11.8px}
+.audio-review audio{height:36px;margin-top:9px}
+.target-section{margin-top:14px;padding-top:12px}
+.target-heading{margin-bottom:7px}
+.target-choice{min-height:33px;padding:6px 8px}
+.capture-actions{margin-top:9px;padding-top:12px}
+.save-button{min-width:140px}
+
+@media(max-width:520px){.capture-body{padding:0 16px 14px}.capture-intro h1{font-size:23px}}
