@@ -7,27 +7,40 @@
   <link rel="stylesheet" href="ui.css">
 </head>
 <body class="popup">
-  <main class="surface">
-    <header class="product-header">
+  <main class="popup-shell">
+    <header class="app-header popup-header">
       <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
-      <span id="trackingBadge" class="state-badge" hidden>Activo</span>
+      <button id="stopTracking" class="text-button danger-text" type="button" hidden>Dejar de seguir</button>
     </header>
 
-    <section id="state" class="context-block" aria-live="polite">
-      <div class="skeleton-line wide"></div><div class="skeleton-line"></div>
+    <section id="state" class="current-context" aria-live="polite"></section>
+
+    <section id="worksetSection" class="workset-section" hidden>
+      <div class="section-heading"><strong>Pestañas del contexto</strong><button id="addTabs" class="text-button" type="button">Añadir pestañas</button></div>
+      <div id="memberList" class="member-list"></div>
     </section>
 
-    <section id="actions" class="tracking-controls" hidden>
-      <div class="control-label">Reconocer este contexto como</div>
-      <div class="segmented" role="radiogroup" aria-label="Alcance del contexto">
-        <button type="button" data-scope="tab" role="radio" aria-checked="false">Pestaña</button>
-        <button type="button" data-scope="url" role="radio" aria-checked="false">Página</button>
-        <button type="button" data-scope="site" role="radio" aria-checked="false">Sitio</button>
+    <section id="emptyActions" class="empty-actions" hidden>
+      <button id="createContext" class="primary compact" type="button">Crear contexto</button>
+      <button id="addTabsEmpty" class="secondary compact" type="button">Elegir varias pestañas</button>
+      <button id="simpleToggle" class="text-button subdued" type="button">Seguimiento por página o sitio</button>
+      <div id="simplePanel" class="simple-panel" hidden>
+        <div class="segmented small" role="radiogroup" aria-label="Alcance simple">
+          <button type="button" data-scope="tab" role="radio" aria-checked="false">Pestaña</button>
+          <button type="button" data-scope="url" role="radio" aria-checked="true">Página</button>
+          <button type="button" data-scope="site" role="radio" aria-checked="false">Sitio</button>
+        </div>
+        <button id="simpleFollow" class="secondary compact" type="button">Seguir</button>
       </div>
-      <p id="scopeHelp" class="helper"></p>
-      <button id="followToggle" class="primary compact" type="button">Seguir contexto</button>
-      <div id="popupStatus" class="status" role="status"></div>
     </section>
+
+    <section id="tabPicker" class="tab-picker" hidden>
+      <div class="picker-head"><strong>Elegir pestañas</strong><button id="closePicker" class="icon-only" type="button" aria-label="Cerrar">×</button></div>
+      <div id="tabList" class="tab-list"></div>
+      <div class="picker-foot"><span id="selectionCount" class="helper"></span><button id="saveTabs" class="primary compact" type="button">Guardar selección</button></div>
+    </section>
+
+    <div id="popupStatus" class="status popup-status" role="status"></div>
   </main>
   <script type="module" src="popup.js"></script>
 </body>
