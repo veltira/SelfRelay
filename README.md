@@ -10,16 +10,23 @@ This repository is the canonical home for the CoderCup AI 2026 project.
 
 ## Repository layout
 
-- `apps/extension` — Chrome extension source (pending recovery of the original TypeScript monorepo)
-- `apps/desktop` — Desktop application
-- `apps/web` — Optional web surface
-- `packages/shared` — Shared models and product semantics
-- `supabase` — Future backend/migrations; not required for the local-first MVP
-- `docs` — Product and technical status
-- `artifacts` — Preserved runnable/build outputs
+- `apps/extension` — Maintainable TypeScript source for the Chrome extension.
+- `apps/desktop` — Desktop application placeholder; implementation follows extension hardening/audio.
+- `apps/web` — Optional web surface; intentionally deferred.
+- `packages/shared` — Shared Context/Checkpoint models and product semantics.
+- `supabase` — Reserved for a future backend only if local-first stops being sufficient.
+- `docs` — Product, behavioral reference and technical status.
+- `artifacts/chrome-extension-unpacked` — Preserved compiled extension used as the parity oracle.
 
-## Important
+## Extension development
 
-The current runnable Chrome build is preserved under `artifacts/chrome-extension-unpacked/`. It is compiled output, not a replacement for the original source monorepo.
+```bash
+npm install
+npm run check
+```
+
+`npm run check` builds the shared package, typechecks the extension, runs the parity tests and emits the unpacked extension at `apps/extension/dist/`.
+
+The preserved artifact remains untouched until the maintainable source has been functionally validated in Chrome.
 
 Do not mix this project with BBTY, TNcesito, or any other project.
