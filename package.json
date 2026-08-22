@@ -11,9 +11,9 @@
     "check": "npm run build:shared && npm run typecheck -w @selfrelay/extension && npm run test -w @selfrelay/extension && npm run build -w @selfrelay/extension"
   },
   "devDependencies": {
-    "@types/chrome": "^0.0.322",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "@types/chrome": "0.0.322",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
   },
   "engines": {"node": ">=20"}
 }
