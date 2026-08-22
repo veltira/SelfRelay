@@ -1,5 +1,6 @@
 export type ContextType = 'browser' | 'desktop';
 export type BrowserContextScope = 'tab' | 'url' | 'site';
+export type LocalTranscriptionEngine = 'browser-local' | 'whisper-local';
 
 export interface ContextBase {
   id: string;
@@ -32,9 +33,14 @@ export interface Checkpoint {
   id: string;
   userId?: string | null;
   contextId: string;
+  /** User-authored text. May be empty for an audio-only checkpoint. */
   originalText: string;
+  /** IndexedDB asset key. Optional so pre-audio checkpoints remain valid without migration. */
   audioRef?: string | null;
+  audioMimeType?: string | null;
+  audioDurationMs?: number | null;
   transcript?: string | null;
+  transcriptionEngine?: LocalTranscriptionEngine | null;
   structuredSummary?: {
     progress?: string;
     blocker?: string;

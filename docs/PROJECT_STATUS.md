@@ -10,7 +10,7 @@ Its core loop is:
 
 ## Extension source state
 
-The preserved implementation in `artifacts/chrome-extension-unpacked/` remains the behavior reference. Maintainable TypeScript lives under `apps/extension` and shared product models live in `packages/shared`.
+The preserved implementation in `artifacts/chrome-extension-unpacked/` remains a historical behavior reference. Maintainable TypeScript lives under `apps/extension` and shared product models live in `packages/shared`.
 
 The current extension includes:
 
@@ -18,13 +18,17 @@ The current extension includes:
 - Tracking by tab, exact URL, or site.
 - Minimal snapshots only for explicitly followed contexts.
 - Text checkpoint capture with discard/save paths.
-- Automatic recovery of the latest unresolved checkpoint when returning to the matching context.
-- Resolve action and checkpoint history capability.
+- Local audio checkpoints recorded only after explicit microphone action.
+- Binary audio stored in IndexedDB rather than `chrome.storage.local`.
+- Local transcription: on-device Chrome recognition when it can explicitly guarantee `processLocally`, then a packaged Whisper.cpp/WASM multilingual fallback.
+- Automatic recovery of the latest unresolved checkpoint when returning to the matching context; transcript is primary when present and audio playback is secondary.
+- Resolve action and checkpoint history capability; resolution/deletion cleans the referenced binary asset without destructively migrating old text checkpoints.
 - Deterministic full-window deduplication: one interruption per context for one closing window.
 - A durable local exit journal written while tracked tabs are alive, so full-browser shutdown recovery does not depend solely on asynchronous work after Chrome has already exited.
 - Startup reconciliation of durable shutdown state into pending checkpoint captures.
 - One visible capture surface at a time; multiple legitimate pending items advance serially after save/discard.
-- SelfRelay branding and official extension icons at 16/32/48/128 px.
+- SelfRelay branding, official extension icons and official master logo on product surfaces.
+- Redesigned compact popup, checkpoint composer and recovery surface using cold neutrals, navy, blue and cyan accents.
 - Local-first storage; no backend/sync dependency.
 
 ## Validation
@@ -36,9 +40,9 @@ The current extension includes:
 3. extension tests;
 4. extension unpacked build.
 
-The extension suite contains 20 automated tests covering URL/scope parity, normal tab close, same-context multi-tab window close, different-context window close, duplicate prevention, queue ordering, durable full-Chrome restart recovery, preservation of older legitimate pending captures, unsupported schemes, preserved functional manifest capabilities and branding/icon integrity.
+The original shutdown/recovery test suite remains intact. Additional tests cover audio-only/text-only/mixed checkpoints, local transcript metadata, transcription failure preserving audio, playback routing, cleanup on resolve/delete and safe cleanup failure behavior, plus static assertions for the redesigned product surfaces.
 
-Physical Chrome validation remains separate and is documented in `docs/MANUAL_CHROME_VALIDATION.md`. Automated tests must not be described as a completed real-browser E2E.
+The text/shutdown core was physically validated by the user from the packaged ZIP before this audio/UX phase. The new audio/UX build still requires physical browser validation after packaging; automated tests must not be described as a completed microphone/transcription E2E.
 
 ## Distribution
 
@@ -46,14 +50,14 @@ Distribution requirements are defined in `docs/DISTRIBUTION.md`.
 
 A non-developer must never be required to install Node.js/npm/TypeScript/Git or compile SelfRelay. The Chrome deliverable is `SelfRelay-Chrome.zip`, containing the compiled extension directly.
 
-`.github/workflows/package.yml` runs the full extension check, validates the compiled package layout, and creates the user-ready Chrome ZIP automatically. Pull requests and `main` builds produce a validation artifact. Version tags matching `v*` publish the same ZIP to GitHub Releases.
+`.github/workflows/package.yml` runs the full extension check, builds and pins the local Whisper.cpp/WASM fallback, verifies the multilingual `tiny-q5_1` model digest, validates the compiled package layout, and creates the user-ready Chrome ZIP automatically. Pull requests and `main` builds produce a validation artifact. Version tags matching `v*` publish the same ZIP to GitHub Releases.
 
 Desktop must ultimately ship as a normal installer, with `SelfRelay-Setup.exe` as the primary Windows target.
 
-## Next priorities after manual validation
+## Next priorities
 
-1. Run the manual Chrome checklist using the packaged `SelfRelay-Chrome.zip`.
-2. If that passes, proceed to local audio checkpoints.
+1. Physically validate the packaged audio/UX extension in Chrome.
+2. Fix only concrete browser/audio bugs found by that validation.
 3. Then build the mandatory Desktop MVP.
 4. Align Extension/Desktop behavior and design language.
 
