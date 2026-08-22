@@ -30,7 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": ["../../../assets/branding/selfrelay-logo.png"],
+    "icon": ["icons/icon.ico"],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
