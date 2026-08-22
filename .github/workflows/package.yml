@@ -26,7 +26,7 @@ jobs:
       - run: npm run check
       - name: Validate compiled extension
         run: |
-          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('apps/extension/dist/manifest.json','utf8')); if(m.manifest_version!==3||m.name!=='SelfRelay'||m.version!=='0.3.0') process.exit(1); if(!m.permissions.includes('offscreen')) process.exit(1); if(!String(m.content_security_policy?.extension_pages||'').includes('wasm-unsafe-eval')) process.exit(1);"
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('apps/extension/dist/manifest.json','utf8')); if(m.manifest_version!==3||m.name!=='SelfRelay'||m.version!=='0.4.0') process.exit(1); if(!m.permissions.includes('offscreen')) process.exit(1); if(!String(m.content_security_policy?.extension_pages||'').includes('wasm-unsafe-eval')) process.exit(1); const resources=m.web_accessible_resources?.flatMap(x=>x.resources||[])||[]; if(!resources.includes('icons/selfrelay-logo.png')) process.exit(1);"
           test -f apps/extension/dist/background.js
           test -f apps/extension/dist/checkpoint.html
           test -f apps/extension/dist/checkpoint.js
@@ -66,6 +66,7 @@ jobs:
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'manifest.json'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'background.js'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/icon128.png'
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/selfrelay-logo.png'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'offscreen.html'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'offscreen.js'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'fonts/IBMPlexSans-Regular.woff2'
