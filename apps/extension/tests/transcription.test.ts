@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import test from 'node:test';
+import {dirname,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {preparePcm16kMonoFromChannels} from '../src/transcription.ts';
+
+const here=dirname(fileURLToPath(import.meta.url));
+
+test('PCM preparation downmixes stereo, resamples 48 kHz to mono 16 kHz and normalizes quiet speech',()=>{
+  const left=new Float32Array(48000).fill(.2);
+  const right=new Float32Array(48000).fill(0);
+  const pcm=preparePcm16kMonoFromChannels([left,right],48000);
+  assert.equal(pcm.length,16000);
+  assert.ok(Math.abs(pcm[8000]!-.12)<.01,`expected normalized speech near .12, got ${pcm[8000]}`);
+  assert.ok(Math.max(...pcm)<.98);
+});
+
+test('PCM preparation trims long leading and trailing silence without deleting speech',()=>{
+  const source=new Float32Array(24000);
+  source.fill(.08,9600,14400);
+  const pcm=preparePcm16kMonoFromChannels([source],48000);
+  assert.ok(pcm.length>4000&&pcm.length<7000,`unexpected trimmed length ${pcm.length}`);
+  assert.ok(pcm.some(value=>Math.abs(value)>.05));
+});
+
+test('PCM preparation handles already-16 kHz mono without changing duration',()=>{
+  const source=new Float32Array(8000).fill(.2);
+  const pcm=preparePcm16kMonoFromChannels([source],16000);
+  assert.equal(pcm.length,8000);
+});
+
+test('packaged Whisper configuration transcribes rather than translates Spanish',async()=>{
+  const cpp=await readFile(resolve(here,'../../../tools/whisper/selfrelay-whisper.cpp'),'utf8');
+  const worker=await readFile(resolve(here,'../public/vendor/whisper/selfrelay-whisper-worker.js'),'utf8');
+  const transcription=await readFile(resolve(here,'../src/transcription.ts'),'utf8');
+  assert.match(cpp,/params\.translate = false/);
+  assert.match(cpp,/WHISPER_SAMPLING_BEAM_SEARCH/);
+  assert.match(cpp,/beam_size = 5/);
+  assert.match(worker,/ggml-base-q5_1\.bin/);
+  assert.match(transcription,/TARGET_SAMPLE_RATE=16000/);
+  assert.doesNotMatch(transcription,/SpeechRecognition|processLocally|https?:\/\//);
+});
+
+test('Whisper cannot start from capture or page lookup; recovery owns the explicit action',async()=>{
+  const capture=await readFile(resolve(here,'../src/checkpoint.ts'),'utf8');
+  const recovery=await readFile(resolve(here,'../src/content.ts'),'utf8');
+  assert.doesNotMatch(capture,/transcribeLocally|TRANSCRIBE_CHECKPOINT|Transcribiendo/);
+  assert.match(capture,/transcript:null,transcriptionEngine:null/);
+  assert.match(recovery,/transcribe\.onclick=async/);
+  assert.match(recovery,/type:'TRANSCRIBE_CHECKPOINT'/);
+});
