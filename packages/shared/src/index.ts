@@ -13,10 +13,7 @@ export interface ContextBase {
   updatedAt: string;
 }
 
-/**
- * One explicitly selected page inside a browser work context.
- * Optional on BrowserContext so all pre-workset contexts remain valid without migration.
- */
+/** One explicitly selected logical page inside a browser work context. */
 export interface BrowserContextMember {
   id: string;
   url: string;
@@ -33,10 +30,7 @@ export interface BrowserContext extends ContextBase {
   origin: string;
   faviconUrl: string | null;
   trackedTabId: number | null;
-  /**
-   * Present only for explicitly assembled multi-tab/single-tab worksets.
-   * Legacy tab/url/site contexts omit this field and preserve their historical matching semantics.
-   */
+  /** Present only for explicitly assembled worksets. Legacy tab/url/site contexts omit it. */
   members?: BrowserContextMember[];
 }
 
@@ -59,10 +53,7 @@ export interface Checkpoint {
   audioDurationMs?: number | null;
   transcript?: string | null;
   transcriptionEngine?: LocalTranscriptionEngine | null;
-  /**
-   * Omitted/null means the whole context. A non-empty list limits recovery to the selected workset members.
-   * A one-item list is the explicit per-tab form. Legacy checkpoints omit this field.
-   */
+  /** Null/omitted means the whole context. Non-empty limits recovery to those workset members. */
   targetMemberIds?: string[] | null;
   structuredSummary?: {
     progress?: string;
@@ -73,21 +64,40 @@ export interface Checkpoint {
   resolvedAt: string | null;
 }
 
+/** Immutable member information captured at the moment an exit happens. */
+export interface PendingClosedMember {
+  memberId: string | null;
+  url: string;
+  title: string;
+  faviconUrl?: string | null;
+}
+
+export type PendingExitKind = 'tab' | 'window' | 'shutdown' | 'mixed';
+
 export interface PendingCapture {
   id: string;
   contextId: string;
   url: string;
   title: string;
   closedAt: string;
-  /** Workset member that was last active/closed when known. */
+  /** Legacy compatibility: representative workset member for this pending. */
   memberId?: string | null;
-  /** Internal idempotency key used to avoid duplicate shutdown recovery. */
+  /** Snapshot of every logical workset member affected by this still-unprocessed exit event. */
+  closedMembers?: PendingClosedMember[];
+  /** Default targeting for the capture UI. Null means whole context. */
+  defaultTargetMemberIds?: string[] | null;
+  /** Browser session whose exit events are allowed to aggregate into this pending. */
+  exitSessionId?: string;
+  exitKind?: PendingExitKind;
+  /** Primary historical idempotency key. */
   sourceKey?: string;
+  /** Additional source keys folded into an already-visible pending. */
+  sourceKeys?: string[];
 }
 
 export interface BrowserTabSnapshot {
   tabId: number;
-  /** Present for snapshots captured by current extension builds. Optional for backward compatibility with old session data. */
+  /** Present for snapshots captured by current extension builds. Optional for backward compatibility. */
   windowId?: number;
   contextId: string;
   /** Workset member matched by this tab, absent on legacy contexts. */
