@@ -27,6 +27,7 @@ async function openExtensionPage(serviceWorker,extensionId,path){const url=`chro
 async function memberCount(page,count){await page.waitForFunction(expected=>document.querySelectorAll('.member-row').length===expected,count,{timeout:10000});const label=(await page.locator('#memberCount').textContent())?.trim()||'';if(count===1&&!label.includes('1 pestaña seguida'))throw new Error(`member_count_label:${label}`);if(count>1&&!label.includes(`${count} pestañas seguidas`))throw new Error(`member_count_label:${label}`);}
 async function checkPickerRow(page,title){const row=page.locator('.picker-row').filter({hasText:title});if(await row.count()!==1)throw new Error(`picker_row_missing:${title}`);const input=row.locator('input');if(!await input.isChecked())await input.check();}
 async function removeMemberRow(page,title){const row=page.locator('.member-row').filter({hasText:title});if(await row.count()!==1)throw new Error(`member_row_missing:${title}`);const button=row.locator('.remove-member');if(!await button.isEnabled())throw new Error(`remove_disabled:${title}`);await button.click();}
+async function waitForSavedCheckpoint(serviceWorker){for(let attempt=0;attempt<40;attempt++){const value=await serviceWorker.evaluate(()=>chrome.storage.local.get(['checkpoint:checkpoints','checkpoint:pendingCaptures']));const checkpoints=value['checkpoint:checkpoints']||[],pending=value['checkpoint:pendingCaptures']||[];if(checkpoints.length===1&&pending.length===0)return{checkpoints,pending};await new Promise(resolve=>setTimeout(resolve,100));}return serviceWorker.evaluate(()=>chrome.storage.local.get(['checkpoint:checkpoints','checkpoint:pendingCaptures'])).then(value=>({checkpoints:value['checkpoint:checkpoints']||[],pending:value['checkpoint:pendingCaptures']||[]}));}
 
 try{
   let [serviceWorker]=context.serviceWorkers();if(!serviceWorker)serviceWorker=await context.waitForEvent('serviceworker',{timeout:30000});
@@ -95,10 +96,8 @@ try{
   await new Promise(resolve=>setTimeout(resolve,900));await screenshotElement(capture,'.capture-shell','06-capture-recording.png');
   await capture.locator('#stopRecording').click();await capture.locator('#audioReview').waitFor({state:'visible',timeout:10000});if(!await capture.getByText('Nota de voz',{exact:true}).isVisible())throw new Error('audio_review_missing');if(!await capture.locator('#preview').getAttribute('src'))throw new Error('audio_preview_missing');
   await screenshotElement(capture,'.capture-shell','07-capture-audio-ready.png');
-  await capture.locator('#save').click();
-  await serviceWorker.waitForFunction(()=>true);
-  await new Promise(resolve=>setTimeout(resolve,500));
-  const saved=await serviceWorker.evaluate(()=>chrome.storage.local.get(['checkpoint:checkpoints','checkpoint:pendingCaptures']));const checkpoints=saved['checkpoint:checkpoints']||[],pending=saved['checkpoint:pendingCaptures']||[];if(checkpoints.length!==1||pending.length!==0)throw new Error(`capture_save_failed:${JSON.stringify({checkpoints:checkpoints.length,pending:pending.length})}`);if(!checkpoints[0].audioRef||checkpoints[0].originalText!=='Retomar la revisión desde el segundo apartado.')throw new Error('capture_payload_failed');
+  try{await capture.locator('#save').click();}catch(error){if(!capture.isClosed())throw error;}
+  const saved=await waitForSavedCheckpoint(serviceWorker),checkpoints=saved.checkpoints,pending=saved.pending;if(checkpoints.length!==1||pending.length!==0)throw new Error(`capture_save_failed:${JSON.stringify({checkpoints:checkpoints.length,pending:pending.length})}`);if(!checkpoints[0].audioRef||checkpoints[0].originalText!=='Retomar la revisión desde el segundo apartado.')throw new Error('capture_payload_failed');
   console.log('Capture note + MediaRecorder review + save: PASS');
 
   const recovery=await context.newPage();await recovery.goto(captureUrl);await recovery.waitForFunction(()=>Boolean(document.getElementById('checkpoint-recovery-root')),{timeout:10000});
