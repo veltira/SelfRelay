@@ -11,11 +11,26 @@ export function findBestContext(contexts:BrowserContext[],url:string,tabId?:numb
   return contexts.filter(context=>matches(context,url,tabId)).sort((a,b)=>rank[a.scope]-rank[b.scope]||b.updatedAt.localeCompare(a.updatedAt))[0]||null;
 }
 
+function orderedPending(items:PendingCapture[]){return [...items].sort((a,b)=>a.closedAt.localeCompare(b.closedAt)||a.id.localeCompare(b.id));}
+
 export function createBackgroundController(api:ChromeApi,deps:{now?:Clock;uuid?:IdFactory}={}){
   const storage=createStorage(api);
   const now=deps.now??(()=>new Date().toISOString());
   const uuid=deps.uuid??(()=>crypto.randomUUID());
+  let removalQueue:Promise<void>=Promise.resolve();
+  let captureQueue:Promise<void>=Promise.resolve();
+  let captureWindowId:number|null=null;
 
+  function enqueueRemoval<T>(work:()=>Promise<T>){
+    const task=removalQueue.then(work,work);
+    removalQueue=task.then(()=>undefined,()=>undefined);
+    return task;
+  }
+  function enqueueCapture<T>(work:()=>Promise<T>){
+    const task=captureQueue.then(work,work);
+    captureQueue=task.then(()=>undefined,()=>undefined);
+    return task;
+  }
   async function getActiveTab(){const tabs=await api.tabs.query({active:true,lastFocusedWindow:true});return tabs[0]||null;}
   async function refreshAllTabs(){for(const tab of await api.tabs.query({}))await refreshTab(tab);}
   async function refreshTab(tab:chrome.tabs.Tab){
@@ -51,24 +66,40 @@ export function createBackgroundController(api:ChromeApi,deps:{now?:Clock;uuid?:
     await storage.setContexts(contexts);await refreshTab(tab);return{ok:true,context};
   }
   async function untrackContext(contextId:string){const contexts=(await storage.getContexts()).filter(item=>item.id!==contextId);await storage.setContexts(contexts);const snapshots=await storage.getSnapshots();for(const [key,value] of Object.entries(snapshots))if(value.contextId===contextId)delete snapshots[key];await storage.setSnapshots(snapshots);return{ok:true};}
-  async function handleRemoved(tabId:number,isWindowClosing:boolean){
-    const snapshots=await storage.getSnapshots();const snapshot=snapshots[String(tabId)];if(!snapshot)return;
-    delete snapshots[String(tabId)];await storage.setSnapshots(snapshots);
-    const contexts=await storage.getContexts();const context=contexts.find(item=>item.id===snapshot.contextId);if(!context)return;
-    if(context.scope==='tab'&&context.trackedTabId===tabId){const index=contexts.findIndex(item=>item.id===context.id);contexts[index]={...context,trackedTabId:null,updatedAt:now()};await storage.setContexts(contexts);}
-    const pending:PendingCapture={id:uuid(),contextId:context.id,url:snapshot.url,title:snapshot.title,closedAt:now()};const all=await storage.getPending();all.push(pending);await storage.setPending(all);
-    if(isWindowClosing)return;
-    try{await api.windows.create({url:api.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(pending.id)}`),type:'popup',width:460,height:560,focused:true});}catch{}
+  async function hasCaptureSurface(){
+    try{const prefix=api.runtime.getURL('checkpoint.html');return (await api.tabs.query({})).some(tab=>typeof tab.url==='string'&&tab.url.startsWith(prefix));}catch{return false;}
   }
-  async function handleStartup(){await refreshAllTabs();const pending=(await storage.getPending()).sort((a,b)=>a.closedAt.localeCompare(b.closedAt));if(!pending[0])return;try{await api.windows.create({url:api.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(pending[0].id)}`),type:'popup',width:460,height:560,focused:true});}catch{}}
+  async function openCapture(pendingId:string){
+    return enqueueCapture(async()=>{
+      if(captureWindowId!==null||await hasCaptureSurface())return false;
+      try{const created=await api.windows.create({url:api.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(pendingId)}`),type:'popup',width:460,height:560,focused:true});captureWindowId=created?.id??null;return true;}catch{return false;}
+    });
+  }
+  async function openOldestPendingCapture(){const first=orderedPending(await storage.getPending())[0];return first?openCapture(first.id):false;}
+  async function processRemoved(tabId:number,isWindowClosing:boolean){
+    const snapshots=await storage.getSnapshots();const snapshot=snapshots[String(tabId)];if(!snapshot)return{ok:true,created:false,pending:null};
+    delete snapshots[String(tabId)];await storage.setSnapshots(snapshots);
+    const contexts=await storage.getContexts();const context=contexts.find(item=>item.id===snapshot.contextId);if(!context)return{ok:true,created:false,pending:null};
+    if(context.scope==='tab'&&context.trackedTabId===tabId){const index=contexts.findIndex(item=>item.id===context.id);contexts[index]={...context,trackedTabId:null,updatedAt:now()};await storage.setContexts(contexts);}
+    const all=await storage.getPending();
+    const equivalent=orderedPending(all.filter(item=>item.contextId===context.id))[0]||null;
+    if(equivalent){if(!isWindowClosing)await openCapture(equivalent.id);return{ok:true,created:false,pending:equivalent};}
+    const pending:PendingCapture={id:uuid(),contextId:context.id,url:snapshot.url,title:snapshot.title,closedAt:now()};all.push(pending);await storage.setPending(all);
+    if(!isWindowClosing)await openCapture(pending.id);
+    return{ok:true,created:true,pending};
+  }
+  function handleRemoved(tabId:number,isWindowClosing:boolean){return enqueueRemoval(()=>processRemoved(tabId,isWindowClosing));}
+  async function handleStartup(){captureWindowId=null;await refreshAllTabs();return openOldestPendingCapture();}
+  function handleWindowRemoved(windowId:number){if(captureWindowId===windowId)captureWindowId=null;}
   async function getPendingCapture(id:string){const pending=(await storage.getPending()).find(item=>item.id===id);if(!pending)return{ok:false,error:'pending_not_found'};const context=(await storage.getContexts()).find(item=>item.id===pending.contextId)||null;return{ok:true,pending,context};}
-  async function discardPending(id:string){await storage.setPending((await storage.getPending()).filter(item=>item.id!==id));return{ok:true};}
-  async function saveCheckpoint(pendingId:string,text:string){const clean=text.replace(/\u0000/g,'').trim().slice(0,12000);if(!clean)return{ok:false,error:'empty_checkpoint'};const pending=(await storage.getPending()).find(item=>item.id===pendingId);if(!pending)return{ok:false,error:'pending_not_found'};const checkpoint:Checkpoint={id:uuid(),contextId:pending.contextId,originalText:clean,createdAt:now(),resolvedAt:null};const all=await storage.getCheckpoints();all.push(checkpoint);await storage.setCheckpoints(all);await discardPending(pendingId);return{ok:true,checkpoint};}
+  async function removePending(id:string){const remaining=(await storage.getPending()).filter(item=>item.id!==id);await storage.setPending(remaining);return orderedPending(remaining)[0]?.id??null;}
+  async function discardPending(id:string){const exists=(await storage.getPending()).some(item=>item.id===id);if(!exists)return{ok:false,error:'pending_not_found'};return{ok:true,nextPendingId:await removePending(id)};}
+  async function saveCheckpoint(pendingId:string,text:string){const clean=text.replace(/\u0000/g,'').trim().slice(0,12000);if(!clean)return{ok:false,error:'empty_checkpoint'};const pending=(await storage.getPending()).find(item=>item.id===pendingId);if(!pending)return{ok:false,error:'pending_not_found'};const checkpoint:Checkpoint={id:uuid(),contextId:pending.contextId,originalText:clean,createdAt:now(),resolvedAt:null};const all=await storage.getCheckpoints();all.push(checkpoint);await storage.setCheckpoints(all);const nextPendingId=await removePending(pendingId);return{ok:true,checkpoint,nextPendingId};}
   async function lookupCheckpoint(rawUrl:string,tabId?:number){let url='';try{url=normalizeUrl(rawUrl);}catch{return{ok:true,checkpoint:null,context:null};}const context=findBestContext(await storage.getContexts(),url,tabId);if(!context)return{ok:true,checkpoint:null,context:null};return{ok:true,checkpoint:(await storage.unresolvedFor(context.id))[0]||null,context};}
   async function resolveCheckpoint(id:string){const all=await storage.getCheckpoints();const index=all.findIndex(item=>item.id===id);if(index<0)return{ok:false,error:'checkpoint_not_found'};all[index]={...all[index]!,resolvedAt:now()};await storage.setCheckpoints(all);return{ok:true};}
   async function getContextHistory(contextId:string){const context=(await storage.getContexts()).find(item=>item.id===contextId)||null;const checkpoints=(await storage.getCheckpoints()).filter(item=>item.contextId===contextId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return{ok:true,context,checkpoints};}
   async function handleMessage(message:any,sender?:chrome.runtime.MessageSender){switch(message?.type){case'GET_ACTIVE_STATE':return getActiveState();case'TRACK_CONTEXT':return trackContext(message.scope);case'UNTRACK_CONTEXT':return untrackContext(String(message.contextId||''));case'GET_PENDING_CAPTURE':return getPendingCapture(String(message.pendingId||''));case'SAVE_CHECKPOINT':return saveCheckpoint(String(message.pendingId||''),String(message.text||''));case'DISCARD_PENDING_CAPTURE':return discardPending(String(message.pendingId||''));case'LOOKUP_CHECKPOINT':return lookupCheckpoint(String(message.url||sender?.tab?.url||''),sender?.tab?.id);case'RESOLVE_CHECKPOINT':return resolveCheckpoint(String(message.checkpointId||''));case'GET_CONTEXT_HISTORY':return getContextHistory(String(message.contextId||''));default:return{ok:false,error:'unknown_message'};}}
-  return{storage,refreshAllTabs,refreshTab,getActiveState,trackContext,untrackContext,handleRemoved,handleStartup,getPendingCapture,discardPending,saveCheckpoint,lookupCheckpoint,resolveCheckpoint,getContextHistory,handleMessage};
+  return{storage,refreshAllTabs,refreshTab,getActiveState,trackContext,untrackContext,handleRemoved,handleStartup,handleWindowRemoved,getPendingCapture,discardPending,saveCheckpoint,lookupCheckpoint,resolveCheckpoint,getContextHistory,handleMessage,openOldestPendingCapture};
 }
 
 export function registerBackground(api:ChromeApi,deps:{now?:Clock;uuid?:IdFactory}={}){
@@ -78,6 +109,7 @@ export function registerBackground(api:ChromeApi,deps:{now?:Clock;uuid?:IdFactor
   api.tabs.onCreated.addListener(tab=>{void controller.refreshTab(tab);});
   api.tabs.onUpdated.addListener((tabId,changeInfo,tab)=>{if(changeInfo.url||changeInfo.status==='complete'||changeInfo.title)void controller.refreshTab({...tab,id:tabId});});
   api.tabs.onRemoved.addListener((tabId,info)=>{void controller.handleRemoved(tabId,info.isWindowClosing);});
+  api.windows.onRemoved.addListener(windowId=>{controller.handleWindowRemoved(windowId);});
   api.runtime.onMessage.addListener((message,sender,sendResponse)=>{void controller.handleMessage(message,sender).then(sendResponse).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:'unknown_error'}));return true;});
   return controller;
 }
