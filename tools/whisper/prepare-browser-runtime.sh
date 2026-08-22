@@ -6,12 +6,12 @@ OUT="$ROOT/apps/extension/public/vendor/whisper"
 WORK="${RUNNER_TEMP:-/tmp}/selfrelay-whisper-build"
 EMSDK_VERSION="4.0.12"
 WHISPER_VERSION="v1.9.1"
-MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-tiny-q5_1.bin?download=true"
-MODEL_SHA256="818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"
+MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-base-q5_1.bin?download=true"
+MODEL_SHA256="422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
 
 rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
-rm -f "$OUT/selfrelay-whisper.js" "$OUT/selfrelay-whisper.wasm" "$OUT/ggml-tiny-q5_1.bin"
+rm -f "$OUT/selfrelay-whisper.js" "$OUT/selfrelay-whisper.wasm" "$OUT/ggml-tiny-q5_1.bin" "$OUT/ggml-base-q5_1.bin"
 
 git clone --quiet --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$WORK/emsdk"
 "$WORK/emsdk/emsdk" install "$EMSDK_VERSION"
@@ -39,8 +39,6 @@ test -n "$RUNTIME_JS" && test -n "$RUNTIME_WASM"
 cp "$RUNTIME_JS" "$OUT/selfrelay-whisper.js"
 cp "$RUNTIME_WASM" "$OUT/selfrelay-whisper.wasm"
 
-curl --fail --location --retry 3 --silent --show-error "$MODEL_URL" -o "$OUT/ggml-tiny-q5_1.bin"
-echo "$MODEL_SHA256  $OUT/ggml-tiny-q5_1.bin" | sha256sum --check --status
-
-test "$(stat -c%s "$OUT/ggml-tiny-q5_1.bin")" -eq 32152673
-printf 'Prepared SelfRelay local transcription runtime: %s\n' "$OUT"
+curl --fail --location --retry 3 --silent --show-error "$MODEL_URL" -o "$OUT/ggml-base-q5_1.bin"
+echo "$MODEL_SHA256  $OUT/ggml-base-q5_1.bin" | sha256sum --check --status
+printf 'Prepared SelfRelay local transcription runtime with multilingual base-q5_1: %s\n' "$OUT"
