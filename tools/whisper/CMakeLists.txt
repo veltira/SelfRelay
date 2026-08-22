@@ -14,6 +14,7 @@ target_link_options(selfrelay-whisper PRIVATE
   "-sENVIRONMENT=worker"
   "-sDYNAMIC_EXECUTION=0"
   "-sEMBIND_AOT=1"
+  "-sASSERTIONS=1"
   "-sEXPORTED_RUNTIME_METHODS=['FS_createDataFile','FS_unlink']"
 )
 set_target_properties(selfrelay-whisper PROPERTIES SUFFIX ".js")
