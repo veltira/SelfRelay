@@ -1,1 +1,34 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SelfRelay</title><link rel="stylesheet" href="ui.css"></head><body class="popup"><main><header><span class="brand">SelfRelay</span><h1>Seguir contexto</h1></header><section id="state"></section><section id="actions" class="stack"><button data-scope="tab">Seguir esta pestaña</button><button data-scope="url">Seguir esta URL</button><button data-scope="site">Seguir todo este sitio</button><button id="stop" class="quiet">Dejar de seguir</button></section></main><script type="module" src="popup.js"></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SelfRelay</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <main class="surface">
+    <header class="product-header">
+      <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
+      <span id="trackingBadge" class="state-badge" hidden>Activo</span>
+    </header>
+
+    <section id="state" class="context-block" aria-live="polite">
+      <div class="skeleton-line wide"></div><div class="skeleton-line"></div>
+    </section>
+
+    <section id="actions" class="tracking-controls" hidden>
+      <div class="control-label">Reconocer este contexto como</div>
+      <div class="segmented" role="radiogroup" aria-label="Alcance del contexto">
+        <button type="button" data-scope="tab" role="radio" aria-checked="false">Pestaña</button>
+        <button type="button" data-scope="url" role="radio" aria-checked="false">Página</button>
+        <button type="button" data-scope="site" role="radio" aria-checked="false">Sitio</button>
+      </div>
+      <p id="scopeHelp" class="helper"></p>
+      <button id="followToggle" class="primary compact" type="button">Seguir contexto</button>
+      <div id="popupStatus" class="status" role="status"></div>
+    </section>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
