@@ -4,7 +4,12 @@ import {TranscriptionRuntimeError,transcribeLocally} from './transcription.js';
 const store=browserAudioAssetStore();
 
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
-  if(message?.target!=='offscreen'||message?.type!=='OFFSCREEN_TRANSCRIBE')return false;
+  if(message?.target!=='offscreen')return false;
+  if(message?.type==='OFFSCREEN_DIAGNOSTICS'){
+    sendResponse({ok:true,crossOriginIsolated:globalThis.crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer!=='undefined',audioContext:typeof AudioContext!=='undefined',indexedDb:typeof indexedDB!=='undefined'});
+    return false;
+  }
+  if(message?.type!=='OFFSCREEN_TRANSCRIBE')return false;
   void (async()=>{
     try{
       if(!store)throw new TranscriptionRuntimeError('audio_storage_unavailable');
