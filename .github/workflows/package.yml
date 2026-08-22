@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - name: Install pinned Playwright Chromium
+        run: npx playwright install --with-deps chromium
       - name: Prepare local IBM Plex fonts
         run: bash tools/fonts/prepare-fonts.sh
       - name: Prepare local Whisper transcription assets
@@ -58,11 +60,8 @@ jobs:
           fi
       - name: Run MediaRecorder WebM and packaged Whisper runtime in Chromium
         run: |
-          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
-          test -n "$CHROME_BIN"
-          command -v xvfb-run
           test -f "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
-          CHROME_BIN="$CHROME_BIN" xvfb-run -a node tools/chrome/transcription-e2e.mjs apps/extension/dist "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
+          node tools/chrome/transcription-e2e.mjs apps/extension/dist "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
       - name: Create SelfRelay-Chrome.zip
         run: |
           rm -f SelfRelay-Chrome.zip
