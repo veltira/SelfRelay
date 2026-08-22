@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Checkpoint",
+  "version": "0.1.0",
+  "description": "Recuperá automáticamente el contexto de trabajo cuando volvés a una página.",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage", "tabs", "windows"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_title": "Checkpoint", "default_popup": "popup.html"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle"}]
+}
