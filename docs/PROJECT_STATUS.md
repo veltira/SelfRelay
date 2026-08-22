@@ -8,48 +8,44 @@ Its core loop is:
 
 **context → exit → checkpoint → return → automatic recovery**
 
-## Reconstructed source state
+## Extension source state
 
-The preserved implementation in `artifacts/chrome-extension-unpacked/` has been inspected file-by-file and its text-checkpoint behavior is now reconstructed as maintainable TypeScript under `apps/extension`.
+The preserved implementation in `artifacts/chrome-extension-unpacked/` remains the behavior reference. Maintainable TypeScript lives under `apps/extension` and shared product models live in `packages/shared`.
 
-The official source now includes:
+The current extension includes:
 
 - Chrome Extension Manifest V3 source/build pipeline.
 - Tracking by tab, exact URL, or site.
 - Minimal snapshots only for explicitly followed contexts.
-- Pending checkpoint creation on `tabs.onRemoved`.
 - Text checkpoint capture with discard/save paths.
 - Automatic recovery of the latest unresolved checkpoint when returning to the matching context.
-- Resolve action and checkpoint history service-worker capability.
-- Full-window-close behavior that persists the pending capture without forcing Chrome to reopen.
-- Startup fallback that surfaces the oldest pending capture.
-- Shared `Context` and `Checkpoint` models in `packages/shared`.
+- Resolve action and checkpoint history capability.
+- Deterministic full-window deduplication: one interruption per context for one closing window.
+- A durable local exit journal written while tracked tabs are alive, so full-browser shutdown recovery does not depend solely on asynchronous work after Chrome has already exited.
+- Startup reconciliation of durable shutdown state into pending checkpoint captures.
+- One visible capture surface at a time; multiple legitimate pending items advance serially after save/discard.
+- SelfRelay branding and official extension icons at 16/32/48/128 px.
 - Local-first storage; no backend/sync dependency.
-- CI running typecheck, 6 parity/core tests and extension build.
 
-The historical local SHA `9ae55515beac6259cd8aeabe23ec83b4dd36b449` remains historical context only; this GitHub repository is now the canonical source.
+## Validation
 
-## Validation completed
+`npm run check` is the merge gate and runs:
 
-The reconstructed code has automated coverage for:
+1. shared TypeScript build;
+2. extension typecheck;
+3. extension tests;
+4. extension unpacked build.
 
-1. URL normalization and supported-scheme rejection.
-2. Tab/URL/site matching and specificity.
-3. `follow → close → capture → save → return → automatic recovery → resolve`.
-4. Full-window close persisting capture without a popup.
-5. Startup surfacing the oldest pending capture.
-6. Unsupported browser pages not being tracked.
+The extension suite contains 20 automated tests covering URL/scope parity, normal tab close, same-context multi-tab window close, different-context window close, duplicate prevention, queue ordering, durable full-Chrome restart recovery, preservation of older legitimate pending captures, unsupported schemes, preserved functional manifest capabilities and branding/icon integrity.
 
-CI must remain green before parity work is considered safe to merge.
+Physical Chrome validation remains separate and is documented in `docs/MANUAL_CHROME_VALIDATION.md`. Automated tests must not be described as a completed real-browser E2E.
 
-## Next priorities
+## Next priorities after manual validation
 
-1. Validate the rebuilt `apps/extension/dist` in a normal Chrome installation against the preserved artifact.
-2. Harden full-browser-close recovery, including duplicate-pending prevention during multi-tab/window shutdown.
-3. Apply SelfRelay branding and UX polish without changing the mechanic.
-4. Add local audio checkpoints.
-5. Build the mandatory Desktop MVP.
-6. Align Extension/Desktop behavior and design language.
+1. Run the manual Chrome checklist against `apps/extension/dist`.
+2. If that passes, proceed to local audio checkpoints.
+3. Then build the mandatory Desktop MVP.
+4. Align Extension/Desktop behavior and design language.
 
 ## Explicitly deferred
 
