@@ -8,6 +8,7 @@ target_link_options(selfrelay-whisper PRIVATE
   "-sEXPORT_ES6=1"
   "-sEXPORT_NAME=createSelfRelayWhisperModule"
   "-sUSE_PTHREADS=1"
+  "-sPTHREAD_POOL_SIZE=4"
   "-sPTHREAD_POOL_SIZE_STRICT=0"
   "-sALLOW_MEMORY_GROWTH=1"
   "-sINITIAL_MEMORY=536870912"
