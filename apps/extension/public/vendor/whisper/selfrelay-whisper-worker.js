@@ -2,12 +2,13 @@ import createSelfRelayWhisperModule from './selfrelay-whisper.js';
 
 let modulePromise;
 
-async function loadModule(){
+async function loadModule(id){
   if(modulePromise)return modulePromise;
   modulePromise=(async()=>{
+    self.postMessage({id,status:'loading-model'});
     const base=new URL('.',import.meta.url);
     const module=await createSelfRelayWhisperModule({locateFile:path=>new URL(path,base).href});
-    const response=await fetch(new URL('ggml-tiny-q5_1.bin',base));
+    const response=await fetch(new URL('ggml-base-q5_1.bin',base));
     if(!response.ok)throw new Error(`model_load_failed_${response.status}`);
     const bytes=new Uint8Array(await response.arrayBuffer());
     module.FS_createDataFile('/','selfrelay-model.bin',bytes,true,false,false);
@@ -21,7 +22,8 @@ self.onmessage=async event=>{
   const {id,samples,language,threads}=event.data||{};
   if(!id||!(samples instanceof ArrayBuffer))return;
   try{
-    const module=await loadModule();
+    const module=await loadModule(id);
+    self.postMessage({id,status:'transcribing'});
     const text=module.transcribe(new Float32Array(samples),String(language||'es'),Math.max(1,Math.min(4,Number(threads)||1)));
     self.postMessage({id,ok:true,text:String(text||'').trim()});
   }catch(error){
