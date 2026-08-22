@@ -1,0 +1,29 @@
+"use strict";
+const ROOT_ID = 'checkpoint-recovery-root';
+void lookup();
+async function lookup() { if (document.getElementById(ROOT_ID))
+    return; let result; try {
+    result = await chrome.runtime.sendMessage({ type: 'LOOKUP_CHECKPOINT', url: location.href });
+}
+catch {
+    return;
+} if (!result?.checkpoint || !result?.context)
+    return; render(result); }
+function render(result) {
+    const host = document.createElement('div');
+    host.id = ROOT_ID;
+    host.style.cssText = 'all:initial;position:fixed;z-index:2147483647;right:20px;top:20px;width:min(380px,calc(100vw - 32px));font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17211c;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `<style>:host{all:initial}.card{box-sizing:border-box;background:#fffdf8;border:1px solid #d6dbd6;border-radius:16px;box-shadow:0 18px 48px rgba(18,28,23,.18);padding:18px;color:#17211c}.eyebrow{font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#3a6a55}.title{font-size:17px;font-weight:750;margin:6px 0 8px}.body{white-space:pre-wrap;font-size:15px;line-height:1.5;margin:0 0 14px}.meta{font-size:12px;color:#66716b;margin-bottom:12px}.row{display:flex;gap:8px;justify-content:flex-end}.btn{appearance:none;border:1px solid #c9d0cb;background:#fff;color:#17211c;border-radius:10px;padding:9px 12px;font:600 13px system-ui;cursor:pointer}.primary{background:#315f4c;border-color:#315f4c;color:white}.btn:focus-visible{outline:3px solid #83b59f;outline-offset:2px}@media(max-width:520px){.card{border-radius:14px}.row{flex-direction:column}.btn{width:100%}}</style><div class="card" role="dialog" aria-label="Checkpoint pendiente"><div class="eyebrow">Volviste a este contexto</div><div class="title">Tu último checkpoint</div><p class="body"></p><div class="meta"></div><div class="row"><button class="btn" data-action="dismiss">Ahora no</button><button class="btn primary" data-action="resolve">Listo, ya lo retomé</button></div></div>`;
+    shadow.querySelector('.body').textContent = result.checkpoint.originalText;
+    shadow.querySelector('.meta').textContent = `Guardado ${formatDate(result.checkpoint.createdAt)}`;
+    shadow.querySelector('[data-action="dismiss"]').onclick = () => host.remove();
+    shadow.querySelector('[data-action="resolve"]').onclick = async () => { await chrome.runtime.sendMessage({ type: 'RESOLVE_CHECKPOINT', checkpointId: result.checkpoint.id }); host.remove(); };
+    document.documentElement.append(host);
+}
+function formatDate(raw) { try {
+    return new Intl.DateTimeFormat('es-UY', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(raw));
+}
+catch {
+    return '';
+} }
