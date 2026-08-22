@@ -2,28 +2,29 @@
 
 This checklist validates the real browser behavior that automated tests cannot prove by themselves.
 
-## Build and load
+## Build artifact and load
 
-From the repository root:
+Physical validation must use the compiled package produced by SelfRelay packaging, not a developer build performed by the tester.
 
-```bash
-npm install
-npm run check
-```
+Required artifact:
 
-The unpacked extension is generated at:
+`SelfRelay-Chrome.zip`
 
-`apps/extension/dist`
+The package workflow builds the extension, runs the automated merge gate, validates the ZIP layout, and publishes the ZIP as a GitHub Actions artifact. Stable version tags will publish the same ZIP as a GitHub Release asset.
 
 Load it in Chrome:
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Select **Load unpacked**.
-4. Choose the repository folder `apps/extension/dist`.
-5. Confirm the extension is named **SelfRelay** and the blue/teal SelfRelay icon appears in the extension list and toolbar.
+1. Download `SelfRelay-Chrome.zip`.
+2. Extract it to a normal folder.
+3. Open `chrome://extensions`.
+4. Enable **Developer mode**.
+5. Select **Load unpacked**.
+6. Choose the extracted folder that directly contains `manifest.json`.
+7. Confirm the extension is named **SelfRelay** and the official SelfRelay icon appears in the extension list and toolbar.
 
 Do not load `artifacts/chrome-extension-unpacked`; that directory is only the preserved behavior reference.
+
+The tester must not install Node.js, npm, TypeScript, Git, dependencies, or run a build manually.
 
 ## Scenario A — normal tab close
 
@@ -91,4 +92,4 @@ If a scenario fails, record:
 - number of capture windows shown;
 - whether the extension service worker reports an error in `chrome://extensions`.
 
-Automated CI validates logic/build. This document is the required physical Chrome validation and must not be reported as completed until performed in a normal Chrome installation.
+Automated CI validates logic/build/package integrity. This document is the required physical Chrome validation and must not be reported as completed until performed in a normal Chrome installation.
