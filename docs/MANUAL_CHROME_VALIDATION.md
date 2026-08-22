@@ -6,124 +6,128 @@ This checklist validates real browser behavior that automated tests cannot prove
 
 Required artifact: `SelfRelay-Chrome.zip`.
 
-1. Download `SelfRelay-Chrome.zip`.
-2. Extract it.
-3. Open `chrome://extensions`.
-4. Enable **Developer mode**.
-5. Select **Load unpacked**.
-6. Choose the extracted folder that directly contains `manifest.json`.
-7. Confirm the extension is named **SelfRelay** and uses the official icon.
+1. Download and extract `SelfRelay-Chrome.zip`.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Select **Load unpacked**.
+5. Choose the extracted folder that directly contains `manifest.json`.
+6. Confirm the extension is named **SelfRelay** and uses the official icon.
 
 Do not load `artifacts/chrome-extension-unpacked`; that directory is historical reference only. The tester must not install Node.js/npm/TypeScript/Git or run a build.
 
-## Scenario A — single-page compatibility
+## Scenario A — one selected tab
 
-1. Open a normal `https://` page.
-2. Create a SelfRelay context containing only that page, or use the secondary legacy page scope.
-3. Close the page while Chrome stays open.
-4. Expect exactly one `¿Dónde quedaste?` capture.
-5. Save a text checkpoint.
-6. Reopen the page.
-7. Expect one recovery surface.
-8. Resolve it.
+1. Create a SelfRelay context containing one normal `https://` page.
+2. Close that page while Chrome remains open.
+3. Expect exactly one `¿Dónde quedaste?` capture.
+4. Because the context has one member, no redundant `Esta pestaña / Todo el contexto` selector should appear.
+5. Save and reopen the page.
+6. Expect one recovery surface and resolve it.
 
-Pass: the original `context → exit → checkpoint → return → automatic recovery` loop remains intact.
+Pass: the simple `context → exit → checkpoint → return → automatic recovery` loop remains intact.
 
-## Scenario B — explicit multi-tab context
+## Scenario B — close any member of a four-tab workset
 
-1. Open four related work tabs, for example an issue, documentation, local app and reference page.
-2. From SelfRelay choose multiple tabs for one context.
-3. Confirm only the selected supported tabs appear in the context list.
-4. Close one selected tab while at least one other selected tab remains open.
-5. Expect no exit checkpoint yet.
-6. Close the remaining selected tabs.
-7. Expect one capture for the context, not one capture per tab.
-8. Save one general checkpoint.
-9. Reopen any one member URL.
-10. Expect the same checkpoint to recover.
+Create A/B/C/D as one workset.
 
-Pass: one work context can be resumed from any member and only the last-member exit creates its general pending capture.
+1. Close A while B/C/D remain open.
+2. Expect one capture immediately.
+3. The context line should identify A (`Cerraste …`).
+4. `Guardar para` should default to **Esta pestaña**.
+5. Save for that default.
+6. Reopen A: the checkpoint must appear.
+7. Open B/C/D: that member-specific checkpoint must not appear there.
 
-## Scenario C — checkpoint targeting
+Pass: closing any selected member is an exit event; SelfRelay no longer waits for the last member.
 
-With a context containing A, B, C and D:
+## Scenario C — aggregate rapid closes without window spam
 
-1. Leave the context and open the capture.
-2. Save once with the default target, **todo el contexto**.
-3. On another exit, use **Elegir pestañas** and select A, B and D.
-4. Verify the subset checkpoint appears when returning through A/B/D but not C.
-5. Repeat selecting only one member to validate explicit per-tab targeting.
-6. If a member-specific and a general checkpoint are both unresolved, verify the member-specific checkpoint appears first on that member.
+1. With A/B/C/D, close A.
+2. Leave the capture open and close B.
+3. Verify there is still only one capture window.
+4. The capture should update to `Cerraste 2 pestañas de este contexto`.
+5. Save for **Estas pestañas**.
+6. Verify one checkpoint was created for A+B, not two checkpoint copies.
+7. Later, after that pending is processed, close C and verify a new capture appears.
 
-Pass: targeting changes eligibility/specificity without creating duplicate copies of one checkpoint.
+Pass: unprocessed exits from the same workset/session aggregate explicitly; processed exits do not.
 
-## Scenario D — missing-tab restoration
+## Scenario D — targeting choices
 
-1. Create a context with four tabs A/B/C/D.
-2. Leave and save a general checkpoint.
-3. Return by opening only A.
-4. Recovery should offer to open the three missing tabs.
-5. Activate that action.
-6. Verify B/C/D open in the current work window, A is not duplicated, and already-open tabs elsewhere are not duplicated.
-7. If all four are already open, the restoration action should not appear.
+For a context A/B/C/D and an open capture:
 
-Pass: restoration is explicit, safe and opens only missing supported URLs.
+1. Save once for **Esta pestaña / Estas pestañas**.
+2. On another exit choose **Todo el contexto** and verify one general checkpoint recovers from any member.
+3. On another exit choose **Elegir…**, select A+C and save.
+4. Verify that checkpoint appears on A/C and not B/D.
+5. If specific, subset and general checkpoints coexist, verify priority is specific → subset → general.
 
-## Scenario E — audio exits immediately, transcription is deferred
+Pass: targeting controls eligibility without duplicating one checkpoint record.
 
-1. Leave a followed context and record a short Spanish audio checkpoint.
-2. Stop recording.
-3. Verify the player appears immediately and no transcription UI or processing starts.
-4. Save the audio checkpoint.
-5. Verify the capture closes without waiting for transcription.
-6. Return to the context.
-7. Verify audio can be played immediately and no transcription starts automatically.
-8. Select **Transcribir audio**.
-9. Verify `Transcribiendo…` appears only now and the page remains usable.
-10. On success, verify the transcript appears, is editable, and remains present after revisiting the checkpoint.
-11. Verify the original audio remains playable.
+## Scenario E — pending remains stable while tabs/context change
 
-Pass: Whisper runs only after the explicit recovery action and the saved audio is independently useful.
+1. Close A and keep its capture open.
+2. Reopen A before saving.
+3. Save for A and verify the checkpoint still uses A's logical member identity.
+4. Repeat and modify the workset while the capture is open; saving/discarding must not error or corrupt the context.
+5. `No guardar` must discard only that exit event and must not stop following the workset.
 
-## Scenario F — transcription retry
+## Scenario F — duplicate URL and cross-workset ownership
 
-1. With an audio checkpoint, request transcription.
-2. If transcription cannot complete, verify SelfRelay shows `No se pudo transcribir` and `Intentar otra vez`.
-3. Verify the audio is still playable and the checkpoint is still unresolved.
-4. Retry.
+1. Open two browser tabs whose normalized URLs are identical.
+2. Add both to a workset; verify SelfRelay represents them as one logical member and restoration never creates duplicate copies.
+3. Try to add a logical page already owned by another workset.
+4. Verify the picker marks the conflict clearly and SelfRelay refuses silent double membership.
 
-Pass: failure never destroys or resolves the original audio checkpoint.
+## Scenario G — window close grouping
 
-## Scenario G — one recovery surface across multiple workset tabs
+1. Put A/B/C from a workset in one Chrome window and D elsewhere.
+2. Close the A/B/C window.
+3. Do not expect three capture windows during `isWindowClosing`.
+4. After the window closes, expect one capture describing three closed tabs.
+5. The default should be **Estas pestañas** because D is still open.
+6. Put the entire workset in one window and close it; expect one grouped capture with **Todo el contexto** preselected.
 
-1. Leave one unresolved general checkpoint for a four-tab context.
-2. Open several member tabs together.
-3. Verify SelfRelay does not show four simultaneous copies of the same checkpoint.
-4. Dismiss/close the owning page and then revisit another member.
+## Scenario H — full Chrome shutdown
 
-Pass: at most one live recovery surface owns a checkpoint at once.
+1. Keep one or more worksets active.
+2. Close all Chrome windows so Chrome exits completely.
+3. SelfRelay must not force Chrome back open or create popup windows during shutdown.
+4. Start Chrome normally.
+5. Expect one coherent pending capture per context, with same-context members grouped.
+6. Different worksets must remain separate and advance through the existing serial queue.
 
-## Scenario H — window close and full Chrome shutdown
+Pass: the durable journal remains authoritative and idempotent.
 
-1. Put all members of one workset in a dedicated Chrome window while another Chrome window remains open.
-2. Close the workset window.
-3. Expect one pending capture for the workset.
-4. Repeat with members split between two windows: closing only one window must not end the context if members remain in the other.
-5. Finally close all Chrome windows so Chrome exits completely.
-6. Start Chrome again normally.
-7. Expect the durable pending recovery behavior to remain intact and serial.
+## Scenario I — missing-tab restoration
 
-Pass: worksets reuse the existing hardened window/shutdown journal without duplicate pendings.
+1. Save a checkpoint in a four-member context.
+2. Return through only one member.
+3. Recovery should offer `Abrir X pestañas restantes` when appropriate.
+4. Use it and verify only missing supported URLs open; already-open pages are not duplicated.
+5. Nothing should restore automatically.
 
-## Scenario I — visual system and packaging
+## Scenario J — audio and deferred local transcription
 
-1. Inspect popup, capture, recovery and audio player.
-2. Confirm the UI is predominantly neutral with restrained blue action color, compact controls, IBM Plex Sans, thin separators and moderate radii.
-3. Confirm there are no permanent `Local` badges, eyebrow labels, decorative gradients/glows or old cream/green styling.
-4. Disconnect networking after the extension is loaded and verify saved audio playback works. Requesting transcription must not require an API key or external model download.
+1. Record a short Spanish audio checkpoint and save it.
+2. Verify no transcription begins during record/stop/save/exit/return.
+3. Return and play audio immediately.
+4. Select **Transcribir audio** explicitly.
+5. Verify processing begins only then; on success the transcript is editable and persisted.
+6. On failure, audio remains intact and retry is available.
+
+Pass: transcription remains packaged/local/on-demand and independent from the saved audio.
+
+## Scenario K — one recovery surface and visual identity
+
+1. Open several member tabs for the same unresolved general checkpoint.
+2. Verify only one recovery card is visible at a time.
+3. Inspect popup, capture, injected recovery and audio player.
+4. Every visible SelfRelay surface must show `[logo] SelfRelay` with the isotipo immediately left of the name.
+5. Confirm navy brand headers, cold neutral surfaces, compact controls, restrained blue/cyan usage, keyboard focus and no decorative gradients/glows/pill-heavy UI.
 
 ## Record failures precisely
 
-Record Chrome version, operating system, exact scenario/step, URLs or number of workset members, number of capture/recovery surfaces, and any extension service-worker/offscreen errors shown by `chrome://extensions`.
+Record Chrome version, operating system, exact scenario/step, number of workset members, number of capture/recovery surfaces, targeting choice, and any extension service-worker/offscreen errors shown by `chrome://extensions`.
 
 Automated CI validates logic/build/package integrity. Physical browser validation must not be reported as completed for a new build until performed in a normal Chrome installation.
