@@ -26,7 +26,7 @@ jobs:
       - run: npm run check
       - name: Validate compiled extension
         run: |
-          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('apps/extension/dist/manifest.json','utf8')); if(m.manifest_version!==3||m.name!=='SelfRelay'||m.version!=='0.4.0') process.exit(1); if(!m.permissions.includes('offscreen')) process.exit(1); if(!String(m.content_security_policy?.extension_pages||'').includes('wasm-unsafe-eval')) process.exit(1); const resources=m.web_accessible_resources?.flatMap(x=>x.resources||[])||[]; if(!resources.includes('icons/selfrelay-logo.png')) process.exit(1);"
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('apps/extension/dist/manifest.json','utf8')); if(m.manifest_version!==3||m.name!=='SelfRelay'||m.version!=='0.4.1') process.exit(1); if(!m.permissions.includes('offscreen')) process.exit(1); if(!String(m.content_security_policy?.extension_pages||'').includes('wasm-unsafe-eval')) process.exit(1); if(m.cross_origin_embedder_policy?.value!=='require-corp'||m.cross_origin_opener_policy?.value!=='same-origin') process.exit(1); const resources=m.web_accessible_resources?.flatMap(x=>x.resources||[])||[]; if(!resources.includes('icons/icon32.png')||resources.includes('icons/selfrelay-logo.png')) process.exit(1);"
           test -f apps/extension/dist/background.js
           test -f apps/extension/dist/checkpoint.html
           test -f apps/extension/dist/checkpoint.js
@@ -37,11 +37,12 @@ jobs:
           test -f apps/extension/dist/audio.js
           test -f apps/extension/dist/offscreen.html
           test -f apps/extension/dist/offscreen.js
-          test -f apps/extension/dist/icons/selfrelay-logo.png
           test -f apps/extension/dist/icons/icon16.png
           test -f apps/extension/dist/icons/icon32.png
           test -f apps/extension/dist/icons/icon48.png
           test -f apps/extension/dist/icons/icon128.png
+          test ! -f apps/extension/dist/icons/selfrelay-logo.png
+          python3 tools/branding/validate-ui-icon.py apps/extension/dist/icons/icon32.png
           test -f apps/extension/dist/fonts/IBMPlexSans-Regular.woff2
           test -f apps/extension/dist/fonts/IBMPlexSans-Medium.woff2
           test -f apps/extension/dist/fonts/IBMPlexSans-SemiBold.woff2
@@ -51,10 +52,21 @@ jobs:
           test -f apps/extension/dist/vendor/whisper/selfrelay-whisper.wasm
           test -f apps/extension/dist/vendor/whisper/ggml-base-q5_1.bin
           echo '422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898  apps/extension/dist/vendor/whisper/ggml-base-q5_1.bin' | sha256sum --check --status
-          if grep -R -E 'api\.openai|generativelanguage|deepgram|assemblyai' apps/extension/dist --exclude='*.wasm' --exclude='*.bin'; then
+          if grep -R -E 'api\.openai|generativelanguage|deepgram|assemblyai|speech\.googleapis|azure' apps/extension/dist --exclude='*.wasm' --exclude='*.bin'; then
             echo 'Remote transcription endpoint found in packaged extension.' >&2
             exit 1
           fi
+      - name: Build MediaRecorder-equivalent WebM/Opus fixture
+        run: |
+          command -v ffmpeg
+          ffmpeg -hide_banner -loglevel error -y -i "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav" -c:a libopus -b:a 48k "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
+          file "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
+      - name: Run packaged Whisper runtime in Chromium
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME_BIN"
+          command -v xvfb-run
+          CHROME_BIN="$CHROME_BIN" xvfb-run -a node tools/chrome/transcription-e2e.mjs apps/extension/dist "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
       - name: Create SelfRelay-Chrome.zip
         run: |
           rm -f SelfRelay-Chrome.zip
@@ -65,14 +77,19 @@ jobs:
           unzip -t SelfRelay-Chrome.zip
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'manifest.json'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'background.js'
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/icon32.png'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/icon128.png'
-          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/selfrelay-logo.png'
+          if unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/selfrelay-logo.png'; then
+            echo 'Corrupt master branding raster must not be shipped.' >&2
+            exit 1
+          fi
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'offscreen.html'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'offscreen.js'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'fonts/IBMPlexSans-Regular.woff2'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'fonts/IBMPlexSans-Medium.woff2'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'fonts/IBMPlexSans-SemiBold.woff2'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'fonts/IBM-Plex-LICENSE.txt'
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'vendor/whisper/selfrelay-whisper-worker.js'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'vendor/whisper/selfrelay-whisper.js'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'vendor/whisper/selfrelay-whisper.wasm'
           unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'vendor/whisper/ggml-base-q5_1.bin'
