@@ -1,10 +1,21 @@
-import type {BrowserContext, BrowserContextScope, BrowserTabSnapshot, Checkpoint, PendingCapture} from '@selfrelay/shared';
+import type {BrowserContext, BrowserContextScope, BrowserTabSnapshot, Checkpoint, LocalTranscriptionEngine, PendingCapture} from '@selfrelay/shared';
 import {contextKey,matches,normalizeUrl} from './url.js';
 import {createStorage, type DurableBrowserTabSnapshot} from './storage.js';
+import {browserAudioAssetStore, type AudioAssetStore} from './audio-store.js';
 
 type ChromeApi=typeof chrome;
 type Clock=()=>string;
 type IdFactory=()=>string;
+
+type BackgroundDeps={now?:Clock;uuid?:IdFactory;audioStore?:AudioAssetStore|null};
+export interface SaveCheckpointInput {
+  text?: string;
+  audioRef?: string|null;
+  audioMimeType?: string|null;
+  audioDurationMs?: number|null;
+  transcript?: string|null;
+  transcriptionEngine?: LocalTranscriptionEngine|null;
+}
 
 export function findBestContext(contexts:BrowserContext[],url:string,tabId?:number){
   const rank:Record<BrowserContextScope,number>={tab:0,url:1,site:2};
@@ -16,9 +27,15 @@ function newestSnapshot<T extends BrowserTabSnapshot>(items:T[]){return [...item
 function durableKey(sessionId:string,tabId:number){return `${sessionId}:${tabId}`;}
 function windowSourceKey(sessionId:string,contextId:string,windowId:number){return `session:${sessionId}:context:${contextId}:window:${windowId}`;}
 function shutdownSourcePrefix(sessionId:string,contextId:string){return `session:${sessionId}:context:${contextId}:`;}
+function cleanText(value:unknown,max=12000){return String(value??'').replace(/\u0000/g,'').trim().slice(0,max);}
+function cleanOptional(value:unknown,max=12000){const cleaned=cleanText(value,max);return cleaned||null;}
+function cleanAudioRef(value:unknown){const cleaned=cleanText(value,180);return cleaned||null;}
+function cleanDuration(value:unknown){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>=0?Math.min(Math.round(parsed),10*60*1000):null;}
+function cleanEngine(value:unknown):LocalTranscriptionEngine|null{return value==='browser-local'||value==='whisper-local'?value:null;}
 
-export function createBackgroundController(api:ChromeApi,deps:{now?:Clock;uuid?:IdFactory}={}){
+export function createBackgroundController(api:ChromeApi,deps:BackgroundDeps={}){
   const storage=createStorage(api);
+  const audioStore=deps.audioStore===undefined?browserAudioAssetStore():deps.audioStore;
   const now=deps.now??(()=>new Date().toISOString());
   const uuid=deps.uuid??(()=>crypto.randomUUID());
   let removalQueue:Promise<void>=Promise.resolve();
@@ -56,7 +73,7 @@ export function createBackgroundController(api:ChromeApi,deps:{now?:Clock;uuid?:
   }
   async function untrackContext(contextId:string){const contexts=(await storage.getContexts()).filter(item=>item.id!==contextId);await storage.setContexts(contexts);const snapshots=await storage.getSnapshots();for(const [key,value] of Object.entries(snapshots))if(value.contextId===contextId)delete snapshots[key];await storage.setSnapshots(snapshots);const durable=await storage.getDurableSnapshots();for(const [key,value] of Object.entries(durable))if(value.contextId===contextId)delete durable[key];await storage.setDurableSnapshots(durable);return{ok:true};}
   async function hasCaptureSurface(){try{const prefix=api.runtime.getURL('checkpoint.html');return (await api.tabs.query({})).some(tab=>typeof tab.url==='string'&&tab.url.startsWith(prefix));}catch{return false;}}
-  async function openCapture(pendingId:string){return enqueueCapture(async()=>{if(captureWindowId!==null||await hasCaptureSurface())return false;try{const created=await api.windows.create({url:api.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(pendingId)}`),type:'popup',width:460,height:560,focused:true});captureWindowId=created?.id??null;return true;}catch{return false;}});}
+  async function openCapture(pendingId:string){return enqueueCapture(async()=>{if(captureWindowId!==null||await hasCaptureSurface())return false;try{const created=await api.windows.create({url:api.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(pendingId)}`),type:'popup',width:560,height:720,focused:true});captureWindowId=created?.id??null;return true;}catch{return false;}});}
   async function openOldestPendingCapture(){const first=orderedPending(await storage.getPending())[0];return first?openCapture(first.id):false;}
   async function clearTrackedTabBindings(contexts:BrowserContext[],snapshots:BrowserTabSnapshot[]){const removedTabIds=new Set(snapshots.map(item=>item.tabId));let changed=false;for(let i=0;i<contexts.length;i++){const context=contexts[i]!;if(context.scope==='tab'&&context.trackedTabId!==null&&removedTabIds.has(context.trackedTabId)){contexts[i]={...context,trackedTabId:null,updatedAt:now()};changed=true;}}if(changed)await storage.setContexts(contexts);}
   async function processWindowClose(tabId:number,windowId:number){
@@ -74,15 +91,38 @@ export function createBackgroundController(api:ChromeApi,deps:{now?:Clock;uuid?:
   async function getPendingCapture(id:string){const pending=(await storage.getPending()).find(item=>item.id===id);if(!pending)return{ok:false,error:'pending_not_found'};const context=(await storage.getContexts()).find(item=>item.id===pending.contextId)||null;return{ok:true,pending,context};}
   async function removePending(id:string){const remaining=(await storage.getPending()).filter(item=>item.id!==id);await storage.setPending(remaining);return orderedPending(remaining)[0]?.id??null;}
   async function discardPending(id:string){const exists=(await storage.getPending()).some(item=>item.id===id);if(!exists)return{ok:false,error:'pending_not_found'};return{ok:true,nextPendingId:await removePending(id)};}
-  async function saveCheckpoint(pendingId:string,text:string){const clean=text.replace(/\u0000/g,'').trim().slice(0,12000);if(!clean)return{ok:false,error:'empty_checkpoint'};const pending=(await storage.getPending()).find(item=>item.id===pendingId);if(!pending)return{ok:false,error:'pending_not_found'};const checkpoint:Checkpoint={id:uuid(),contextId:pending.contextId,originalText:clean,createdAt:now(),resolvedAt:null};const all=await storage.getCheckpoints();all.push(checkpoint);await storage.setCheckpoints(all);const nextPendingId=await removePending(pendingId);return{ok:true,checkpoint,nextPendingId};}
+  async function saveCheckpoint(pendingId:string,input:string|SaveCheckpointInput){
+    const payload:SaveCheckpointInput=typeof input==='string'?{text:input}:input;
+    const text=cleanText(payload.text);
+    const audioRef=cleanAudioRef(payload.audioRef);
+    if(!text&&!audioRef)return{ok:false,error:'empty_checkpoint'};
+    const pending=(await storage.getPending()).find(item=>item.id===pendingId);if(!pending)return{ok:false,error:'pending_not_found'};
+    const checkpoint:Checkpoint={id:uuid(),contextId:pending.contextId,originalText:text,audioRef,audioMimeType:audioRef?cleanOptional(payload.audioMimeType,120):null,audioDurationMs:audioRef?cleanDuration(payload.audioDurationMs):null,transcript:cleanOptional(payload.transcript),transcriptionEngine:cleanEngine(payload.transcriptionEngine),createdAt:now(),resolvedAt:null};
+    const all=await storage.getCheckpoints();all.push(checkpoint);await storage.setCheckpoints(all);const nextPendingId=await removePending(pendingId);return{ok:true,checkpoint,nextPendingId};
+  }
   async function lookupCheckpoint(rawUrl:string,tabId?:number){let url='';try{url=normalizeUrl(rawUrl);}catch{return{ok:true,checkpoint:null,context:null};}const context=findBestContext(await storage.getContexts(),url,tabId);if(!context)return{ok:true,checkpoint:null,context:null};return{ok:true,checkpoint:(await storage.unresolvedFor(context.id))[0]||null,context};}
-  async function resolveCheckpoint(id:string){const all=await storage.getCheckpoints();const index=all.findIndex(item=>item.id===id);if(index<0)return{ok:false,error:'checkpoint_not_found'};all[index]={...all[index]!,resolvedAt:now()};await storage.setCheckpoints(all);return{ok:true};}
+  async function cleanupAudio(checkpoint:Checkpoint){
+    if(!checkpoint.audioRef)return true;
+    if(!audioStore)return false;
+    try{await audioStore.delete(checkpoint.audioRef);return true;}catch{return false;}
+  }
+  async function resolveCheckpoint(id:string){
+    const all=await storage.getCheckpoints();const index=all.findIndex(item=>item.id===id);if(index<0)return{ok:false,error:'checkpoint_not_found'};
+    const checkpoint=all[index]!;if(!await cleanupAudio(checkpoint))return{ok:false,error:'audio_cleanup_failed'};
+    all[index]={...checkpoint,audioRef:null,audioMimeType:null,audioDurationMs:null,resolvedAt:now()};await storage.setCheckpoints(all);return{ok:true};
+  }
+  async function deleteCheckpoint(id:string){
+    const all=await storage.getCheckpoints();const checkpoint=all.find(item=>item.id===id);if(!checkpoint)return{ok:false,error:'checkpoint_not_found'};
+    if(!await cleanupAudio(checkpoint))return{ok:false,error:'audio_cleanup_failed'};
+    await storage.setCheckpoints(all.filter(item=>item.id!==id));return{ok:true};
+  }
+  async function openAudioPlayer(audioRef:string){const ref=cleanAudioRef(audioRef);if(!ref)return{ok:false,error:'audio_not_found'};try{await api.windows.create({url:api.runtime.getURL(`audio.html?ref=${encodeURIComponent(ref)}`),type:'popup',width:420,height:240,focused:true});return{ok:true};}catch{return{ok:false,error:'audio_player_failed'};}}
   async function getContextHistory(contextId:string){const context=(await storage.getContexts()).find(item=>item.id===contextId)||null;const checkpoints=(await storage.getCheckpoints()).filter(item=>item.contextId===contextId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return{ok:true,context,checkpoints};}
-  async function handleMessage(message:any,sender?:chrome.runtime.MessageSender){switch(message?.type){case'GET_ACTIVE_STATE':return getActiveState();case'TRACK_CONTEXT':return trackContext(message.scope);case'UNTRACK_CONTEXT':return untrackContext(String(message.contextId||''));case'GET_PENDING_CAPTURE':return getPendingCapture(String(message.pendingId||''));case'SAVE_CHECKPOINT':return saveCheckpoint(String(message.pendingId||''),String(message.text||''));case'DISCARD_PENDING_CAPTURE':return discardPending(String(message.pendingId||''));case'LOOKUP_CHECKPOINT':return lookupCheckpoint(String(message.url||sender?.tab?.url||''),sender?.tab?.id);case'RESOLVE_CHECKPOINT':return resolveCheckpoint(String(message.checkpointId||''));case'GET_CONTEXT_HISTORY':return getContextHistory(String(message.contextId||''));default:return{ok:false,error:'unknown_message'};}}
-  return{storage,refreshAllTabs,refreshTab,getActiveState,trackContext,untrackContext,handleRemoved,handleStartup,handleWindowRemoved,getPendingCapture,discardPending,saveCheckpoint,lookupCheckpoint,resolveCheckpoint,getContextHistory,handleMessage,openOldestPendingCapture,recoverDurableShutdowns};
+  async function handleMessage(message:any,sender?:chrome.runtime.MessageSender){switch(message?.type){case'GET_ACTIVE_STATE':return getActiveState();case'TRACK_CONTEXT':return trackContext(message.scope);case'UNTRACK_CONTEXT':return untrackContext(String(message.contextId||''));case'GET_PENDING_CAPTURE':return getPendingCapture(String(message.pendingId||''));case'SAVE_CHECKPOINT':return saveCheckpoint(String(message.pendingId||''),message.payload??{text:message.text});case'DISCARD_PENDING_CAPTURE':return discardPending(String(message.pendingId||''));case'LOOKUP_CHECKPOINT':return lookupCheckpoint(String(message.url||sender?.tab?.url||''),sender?.tab?.id);case'RESOLVE_CHECKPOINT':return resolveCheckpoint(String(message.checkpointId||''));case'DELETE_CHECKPOINT':return deleteCheckpoint(String(message.checkpointId||''));case'OPEN_AUDIO_PLAYER':return openAudioPlayer(String(message.audioRef||''));case'GET_CONTEXT_HISTORY':return getContextHistory(String(message.contextId||''));default:return{ok:false,error:'unknown_message'};}}
+  return{storage,refreshAllTabs,refreshTab,getActiveState,trackContext,untrackContext,handleRemoved,handleStartup,handleWindowRemoved,getPendingCapture,discardPending,saveCheckpoint,lookupCheckpoint,resolveCheckpoint,deleteCheckpoint,getContextHistory,handleMessage,openOldestPendingCapture,recoverDurableShutdowns};
 }
 
-export function registerBackground(api:ChromeApi,deps:{now?:Clock;uuid?:IdFactory}={}){
+export function registerBackground(api:ChromeApi,deps:BackgroundDeps={}){
   const controller=createBackgroundController(api,deps);
   api.runtime.onInstalled.addListener(()=>{void (async()=>{try{await api.storage.local.setAccessLevel?.({accessLevel:'TRUSTED_CONTEXTS'});}catch{}try{await api.storage.session.setAccessLevel?.({accessLevel:'TRUSTED_CONTEXTS'});}catch{}await controller.refreshAllTabs();})();});
   api.runtime.onStartup.addListener(()=>{void controller.handleStartup();});
