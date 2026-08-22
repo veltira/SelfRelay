@@ -8,6 +8,12 @@ on:
       - apps/desktop/package.json
       - apps/desktop/src-tauri/Cargo.toml
       - .github/workflows/desktop-lock-bootstrap.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/desktop/package.json
+      - apps/desktop/src-tauri/Cargo.toml
+      - .github/workflows/desktop-lock-bootstrap.yml
 
 permissions:
   contents: write
@@ -18,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: desktop/d0-windows-foundation
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
