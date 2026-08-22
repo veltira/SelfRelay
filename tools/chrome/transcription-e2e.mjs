@@ -33,19 +33,21 @@ class Cdp{
 let cdp;
 try{
   const version=await waitDebug();cdp=new Cdp(version.webSocketDebuggerUrl);await cdp.ready();
-  let extensionId='';
-  for(let i=0;i<80&&!extensionId;i++){
+  let extensionId='';let discovered=[];
+  for(let i=0;i<100&&!extensionId;i++){
     const {targetInfos}=await cdp.call('Target.getTargets');
-    const target=targetInfos.find(item=>String(item.url||'').startsWith('chrome-extension://'));
+    discovered=targetInfos.filter(item=>String(item.url||'').startsWith('chrome-extension://')).map(item=>({type:item.type,url:item.url}));
+    const target=targetInfos.find(item=>item.type==='service_worker'&&/^chrome-extension:\/\/[^/]+\/background\.js(?:$|\?)/.test(String(item.url||'')));
     if(target)extensionId=new URL(target.url).host;
     else await sleep(250);
   }
-  if(!extensionId)throw new Error(`extension_not_loaded: ${stderr}`);
+  if(!extensionId)throw new Error(`selfrelay_service_worker_not_found: ${JSON.stringify(discovered)} ${stderr}`);
   const {targetId}=await cdp.call('Target.createTarget',{url:`chrome-extension://${extensionId}/popup.html`});
   const {sessionId}=await cdp.call('Target.attachToTarget',{targetId,flatten:true});
   await cdp.call('Runtime.enable',{},sessionId);
-  await sleep(400);
+  await sleep(500);
   const expression=`(async()=>{
+    if(!globalThis.chrome?.runtime?.getURL)throw new Error('selfrelay_extension_context_missing');
     const isolation={crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer};
     const logo=document.querySelector('.logo');
     await new Promise(resolve=>{if(logo?.complete)return resolve();logo?.addEventListener('load',resolve,{once:true});setTimeout(resolve,1000);});
@@ -83,6 +85,7 @@ try{
   const hits=['hola','prueba','sistema','reconocimiento'].filter(word=>normalized.includes(word));if(hits.length<2)throw new Error(`spanish_recall_failed (${hits.length}/4): ${transcript}`);
   const {targetInfos}=await cdp.call('Target.getTargets');const offscreen=targetInfos.some(item=>String(item.url||'').includes(`chrome-extension://${extensionId}/offscreen.html`));
   if(!offscreen)throw new Error('offscreen_document_not_observed');
+  console.log(`SelfRelay extension id: ${extensionId}`);
   console.log(`SelfRelay Chromium MediaRecorder: ${result.mediaRecorder.mimeType}, ${result.mediaRecorder.size} bytes, ${result.mediaRecorder.durationMs} ms`);
   console.log(`SelfRelay Chromium E2E transcript: ${transcript}`);
   console.log(`Runtime: crossOriginIsolated=${result.isolation.crossOriginIsolated}, SharedArrayBuffer=${result.isolation.sharedArrayBuffer}, offscreen=${offscreen}, engine=${result.storedEngine}`);
