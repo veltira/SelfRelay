@@ -1,1 +1,69 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guardar checkpoint · SelfRelay</title><link rel="stylesheet" href="ui.css"></head><body class="capture"><main><span class="brand">SelfRelay</span><h1 id="title">¿Dónde quedaste?</h1><p id="meta" class="muted"></p><label for="text">Dejá el contexto suficiente para volver sin reconstruirlo.</label><textarea id="text" maxlength="12000" rows="8" placeholder="Ej.: Ya probé A y B. El error aparece al guardar. Siguiente paso: revisar la validación del formulario."></textarea><div id="status" role="status" class="status"></div><div class="buttons"><button id="skip" class="quiet">No guardar</button><button id="save" class="primary">Guardar checkpoint</button></div></main><script type="module" src="checkpoint.js"></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Guardar checkpoint · SelfRelay</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="capture">
+  <main class="capture-shell">
+    <header class="product-header capture-header">
+      <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
+      <span class="local-badge">Procesado en este dispositivo</span>
+    </header>
+
+    <section class="capture-intro">
+      <div class="eyebrow">Checkpoint de salida</div>
+      <h1 id="title">¿Dónde quedaste?</h1>
+      <p id="meta" class="context-meta"></p>
+    </section>
+
+    <section id="composer" class="composer">
+      <label class="sr-only" for="text">Contexto para retomar</label>
+      <textarea id="text" maxlength="12000" rows="6" placeholder="Dejá lo necesario para volver sin reconstruirlo. Qué estabas haciendo, qué falta o cuál es el siguiente paso."></textarea>
+      <div class="composer-toolbar">
+        <button id="record" class="icon-action" type="button" aria-label="Grabar audio" title="Grabar audio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.25a3.75 3.75 0 0 0 3.75-3.75v-5a3.75 3.75 0 0 0-7.5 0v5A3.75 3.75 0 0 0 12 15.25Z"/><path d="M5.75 11.25v.25a6.25 6.25 0 0 0 12.5 0v-.25M12 17.75v3M9.25 20.75h5.5"/></svg>
+          <span>Audio</span>
+        </button>
+        <span class="composer-hint">Texto, audio o ambos</span>
+      </div>
+    </section>
+
+    <section id="recording" class="recording-panel" hidden aria-live="polite">
+      <div class="recording-line">
+        <span class="record-dot" aria-hidden="true"></span><strong>Grabando</strong><time id="timer">00:00</time>
+        <div id="levelMeter" class="level-meter" aria-label="Nivel de audio"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="inline-actions">
+        <button id="cancelRecording" class="text-button" type="button">Cancelar</button>
+        <button id="stopRecording" class="secondary compact" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+          Detener
+        </button>
+      </div>
+    </section>
+
+    <section id="audioReview" class="audio-review" hidden>
+      <div class="review-topline">
+        <div><div class="control-label">Audio guardado</div><span id="audioDuration" class="helper"></span></div>
+        <button id="redoRecording" class="text-button" type="button">Volver a grabar</button>
+      </div>
+      <audio id="preview" controls preload="metadata"></audio>
+      <div id="transcriptionState" class="transcription-state" hidden>Transcribiendo…</div>
+      <div id="transcriptWrap" hidden>
+        <label class="control-label" for="transcript">Transcripción</label>
+        <textarea id="transcript" class="transcript-input" maxlength="12000" rows="4" placeholder="Podés corregir la transcripción antes de guardar."></textarea>
+      </div>
+    </section>
+
+    <div id="status" role="status" class="status capture-status"></div>
+    <footer class="capture-actions">
+      <button id="skip" class="text-button" type="button">No guardar</button>
+      <button id="save" class="primary compact save-button" type="button">Guardar checkpoint</button>
+    </footer>
+  </main>
+  <script type="module" src="checkpoint.js"></script>
+</body>
+</html>
