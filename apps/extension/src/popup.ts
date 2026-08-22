@@ -33,11 +33,8 @@ async function load(){
   activeContext=state.context||null;activeTabId=state.tab.id;
   stateEl.innerHTML=`<div class="current-label">Contexto actual</div><div class="current-title">${escapeHtml(state.tab.title)}</div><div class="current-domain">${escapeHtml(new URL(state.tab.url).hostname)}</div>`;
   stopTracking.hidden=!activeContext;stopTracking.onclick=()=>void stop();
-  if(activeContext){
-    emptyActions.hidden=true;worksetSection.hidden=false;renderMembers();addTabs.onclick=()=>void openPicker();
-  }else{
-    worksetSection.hidden=true;emptyActions.hidden=false;createContext.onclick=()=>void createSingleWorkset();addTabsEmpty.onclick=()=>void openPicker();
-  }
+  if(activeContext){emptyActions.hidden=true;worksetSection.hidden=false;renderMembers();addTabs.onclick=()=>void openPicker();}
+  else{worksetSection.hidden=true;emptyActions.hidden=false;createContext.onclick=()=>void createSingleWorkset();addTabsEmpty.onclick=()=>void openPicker();}
   simpleToggle.onclick=()=>{simplePanel.hidden=!simplePanel.hidden;};simpleFollow.onclick=()=>void startSimple();
   for(const button of scopeButtons){button.onclick=()=>{selectedScope=button.dataset.scope as BrowserContextScope;renderScope();};}renderScope();
 }
@@ -67,13 +64,12 @@ function updateCount(){const count=selectedTabIds.size;selectionCount.textConten
 
 async function saveSelection(){
   const oldLegacy=activeContext&&!Array.isArray(activeContext.members)?activeContext.id:null;setBusy(true);
-  try{const response=await chrome.runtime.sendMessage({type:'UPSERT_WORKSET',tabIds:[...selectedTabIds],contextId:Array.isArray(activeContext?.members)?activeContext.id:null});if(!response?.ok)throw new Error('save_failed');if(oldLegacy)await chrome.runtime.sendMessage({type:'UNTRACK_CONTEXT',contextId:oldLegacy});tabPicker.hidden=true;await load();}catch{showError('No se pudo guardar la selección.');setBusy(false);}
+  const orderedIds=pickerTabs.filter(tab=>selectedTabIds.has(tab.id)).map(tab=>tab.id);
+  try{const response=await chrome.runtime.sendMessage({type:'UPSERT_WORKSET',tabIds:orderedIds,contextId:Array.isArray(activeContext?.members)?activeContext.id:null});if(!response?.ok)throw new Error('save_failed');if(oldLegacy)await chrome.runtime.sendMessage({type:'UNTRACK_CONTEXT',contextId:oldLegacy});tabPicker.hidden=true;await load();}catch{showError('No se pudo guardar la selección.');setBusy(false);}
 }
 
 async function removeMember(memberId:string){setBusy(true);try{const response=await chrome.runtime.sendMessage({type:'REMOVE_WORKSET_MEMBER',contextId:activeContext.id,memberId});if(!response?.ok)throw new Error('remove_failed');await load();}catch{showError('No se pudo quitar la pestaña.');setBusy(false);}}
-
 async function stop(){if(!activeContext)return;setBusy(true);try{const result=await chrome.runtime.sendMessage({type:'UNTRACK_CONTEXT',contextId:activeContext.id});if(!result?.ok)throw new Error('stop_failed');activeContext=null;await load();}catch{showError('No se pudo dejar de seguir.');setBusy(false);}}
-
 async function startSimple(){setBusy(true);try{const result=await chrome.runtime.sendMessage({type:'TRACK_CONTEXT',scope:selectedScope});if(!result?.ok)throw new Error('track_failed');simplePanel.hidden=true;await load();}catch{showError('No se pudo iniciar el seguimiento.');setBusy(false);}}
 
 function renderScope(){for(const button of scopeButtons)button.setAttribute('aria-checked',String(button.dataset.scope===selectedScope));}
