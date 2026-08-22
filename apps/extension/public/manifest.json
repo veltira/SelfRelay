@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "SelfRelay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Recuperá automáticamente el contexto de trabajo cuando volvés a una página.",
   "minimum_chrome_version": "120",
-  "permissions": ["storage", "tabs", "windows"],
+  "permissions": ["storage", "tabs", "windows", "offscreen"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
