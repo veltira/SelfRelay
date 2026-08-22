@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Audio · SelfRelay</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="audio-player">
+  <main class="player-shell">
+    <header class="product-header"><div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div><span class="local-badge">Local</span></header>
+    <h1 class="player-title">Audio del checkpoint</h1>
+    <audio id="audio" controls preload="auto"></audio>
+    <div id="playerStatus" class="player-status" role="status">Cargando audio…</div>
+  </main>
+  <script type="module" src="audio.js"></script>
+</body>
+</html>
