@@ -106,6 +106,12 @@ jobs:
             exit 1
           fi
           du -h SelfRelay-Chrome.zip
+      - name: Run packaged Whisper reuse, reload and zero-error gate
+        run: |
+          rm -rf "$RUNNER_TEMP/selfrelay-packaged-extension"
+          mkdir -p "$RUNNER_TEMP/selfrelay-packaged-extension"
+          unzip -q SelfRelay-Chrome.zip -d "$RUNNER_TEMP/selfrelay-packaged-extension"
+          node tools/chrome/transcription-lifecycle-e2e.mjs "$RUNNER_TEMP/selfrelay-packaged-extension" "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
       - name: Upload Chrome package
         uses: actions/upload-artifact@v4
         with:
