@@ -1,0 +1,52 @@
+name: Desktop CI
+
+on:
+  push:
+    branches:
+      - main
+      - "desktop/**"
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - "docs/DESKTOP_*"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - "docs/DESKTOP_*"
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci --workspaces=false --no-audit --no-fund
+      - name: Frontend typecheck
+        working-directory: apps/desktop
+        run: npm run typecheck
+      - name: Frontend tests
+        working-directory: apps/desktop
+        run: npm test
+      - name: Rust check
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked
+      - name: Rust tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+      - name: Tauri integration build
+        working-directory: apps/desktop
+        run: npm run tauri:build -- --debug --no-bundle

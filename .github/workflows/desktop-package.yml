@@ -1,0 +1,58 @@
+name: Desktop Package
+
+on:
+  push:
+    branches:
+      - "desktop/**"
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-package.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-package.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci --workspaces=false --no-audit --no-fund
+      - name: Build NSIS release
+        working-directory: apps/desktop
+        run: npm run tauri:build
+      - name: Normalize installer name
+        shell: pwsh
+        run: |
+          $nsis = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/bundle/nsis"
+          if (-not (Test-Path $nsis)) { throw "NSIS output directory does not exist: $nsis" }
+          $installer = Get-ChildItem -Path $nsis -Filter "*.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw "No NSIS .exe was produced" }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE/dist" | Out-Null
+          Copy-Item $installer.FullName "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe" -Force
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe")) {
+            throw "SelfRelay-Setup.exe was not created"
+          }
+          Get-Item "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe" | Format-List Name,Length,FullName
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Windows-Installer
+          path: dist/SelfRelay-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
