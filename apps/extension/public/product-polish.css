@@ -1,4 +1,5 @@
 .popup{width:370px}
+.popup-shell{min-height:0}
 .popup-body{padding:0 16px 13px}
 .current-context{padding:13px 1px 12px}
 .context-kicker{font-size:10.5px;font-weight:500;letter-spacing:0;text-transform:none;color:#748196}
