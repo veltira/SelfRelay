@@ -58,10 +58,14 @@ jobs:
       - name: Prepare Chrome for Testing and MediaRecorder-equivalent WebM fixture
         run: |
           set -euo pipefail
-          CHROME_VERSION='151.0.7922.174'
           CHROME_DIR="$RUNNER_TEMP/chrome-for-testing"
+          CFT_JSON="$RUNNER_TEMP/chrome-for-testing.json"
           mkdir -p "$CHROME_DIR"
-          curl --fail --location --retry 3 --silent --show-error "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip" -o "$RUNNER_TEMP/chrome.zip"
+          curl --fail --location --retry 3 --silent --show-error 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json' -o "$CFT_JSON"
+          CHROME_VERSION=$(node -e "const j=require(process.argv[1]); process.stdout.write(j.channels.Stable.version)" "$CFT_JSON")
+          CHROME_URL=$(node -e "const j=require(process.argv[1]); const d=j.channels.Stable.downloads.chrome.find(x=>x.platform==='linux64'); if(!d) process.exit(1); process.stdout.write(d.url)" "$CFT_JSON")
+          echo "Chrome for Testing stable: $CHROME_VERSION"
+          curl --fail --location --retry 3 --silent --show-error "$CHROME_URL" -o "$RUNNER_TEMP/chrome.zip"
           unzip -q "$RUNNER_TEMP/chrome.zip" -d "$CHROME_DIR"
           chmod +x "$CHROME_DIR/chrome-linux64/chrome"
           command -v ffmpeg
