@@ -56,17 +56,13 @@ jobs:
             echo 'Remote transcription endpoint found in packaged extension.' >&2
             exit 1
           fi
-      - name: Build MediaRecorder-equivalent WebM/Opus fixture
-        run: |
-          command -v ffmpeg
-          ffmpeg -hide_banner -loglevel error -y -i "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav" -c:a libopus -b:a 48k "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
-          file "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
-      - name: Run packaged Whisper runtime in Chromium
+      - name: Run MediaRecorder WebM and packaged Whisper runtime in Chromium
         run: |
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$CHROME_BIN"
           command -v xvfb-run
-          CHROME_BIN="$CHROME_BIN" xvfb-run -a node tools/chrome/transcription-e2e.mjs apps/extension/dist "$RUNNER_TEMP/selfrelay-whisper-build/spanish.webm"
+          test -f "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
+          CHROME_BIN="$CHROME_BIN" xvfb-run -a node tools/chrome/transcription-e2e.mjs apps/extension/dist "$RUNNER_TEMP/selfrelay-whisper-build/spanish.wav"
       - name: Create SelfRelay-Chrome.zip
         run: |
           rm -f SelfRelay-Chrome.zip
