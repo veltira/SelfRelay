@@ -16,7 +16,7 @@ SPANISH_SAMPLE_URL="https://raw.githubusercontent.com/wudale/whisper-asr-server/
 
 rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
-rm -f "$OUT/selfrelay-whisper.js" "$OUT/selfrelay-whisper.wasm" "$OUT/ggml-tiny-q5_1.bin" "$OUT/ggml-base-q5_1.bin"
+rm -f "$OUT/selfrelay-whisper.js" "$OUT/selfrelay-whisper.wasm" "$OUT/selfrelay-whisper.worker.js" "$OUT/ggml-tiny-q5_1.bin" "$OUT/ggml-base-q5_1.bin"
 
 git clone --quiet --depth 1 --branch "$WHISPER_VERSION" https://github.com/ggml-org/whisper.cpp.git "$WORK/whisper.cpp"
 curl --fail --location --retry 3 --silent --show-error "$MODEL_URL" -o "$OUT/ggml-base-q5_1.bin"
@@ -45,7 +45,7 @@ printf 'Spanish keyword recall comparison: tiny=%s/4 base=%s/4\n' "$TINY_SCORE" 
 test "$BASE_SCORE" -ge 3
 test "$BASE_SCORE" -ge "$TINY_SCORE"
 
-# Build the exact single-thread browser runtime after the native quality smoke.
+# Build the exact browser runtime after the native quality smoke.
 git clone --quiet --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$WORK/emsdk"
 "$WORK/emsdk/emsdk" install "$EMSDK_VERSION"
 "$WORK/emsdk/emsdk" activate "$EMSDK_VERSION"
@@ -64,7 +64,14 @@ emcmake cmake -S "$WORK/whisper.cpp" -B "$WORK/build" \
 cmake --build "$WORK/build" --target selfrelay-whisper --config Release -j2
 RUNTIME_JS="$(find "$WORK/build" -type f -name 'selfrelay-whisper.js' -print -quit)"
 RUNTIME_WASM="$(find "$WORK/build" -type f -name 'selfrelay-whisper.wasm' -print -quit)"
+RUNTIME_PTHREAD="$(find "$WORK/build" -type f -name 'selfrelay-whisper.worker.js' -print -quit || true)"
 test -n "$RUNTIME_JS" && test -n "$RUNTIME_WASM"
 cp "$RUNTIME_JS" "$OUT/selfrelay-whisper.js"
 cp "$RUNTIME_WASM" "$OUT/selfrelay-whisper.wasm"
+if [[ -n "$RUNTIME_PTHREAD" ]]; then
+  cp "$RUNTIME_PTHREAD" "$OUT/selfrelay-whisper.worker.js"
+  printf 'Packaged Emscripten pthread worker: %s\n' "$OUT/selfrelay-whisper.worker.js"
+else
+  printf 'Emscripten emitted no separate pthread worker sidecar.\n'
+fi
 printf 'Prepared SelfRelay local transcription runtime with multilingual base-q5_1: %s\n' "$OUT"

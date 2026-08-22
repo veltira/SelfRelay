@@ -1,13 +1,19 @@
 {
   "manifest_version": 3,
   "name": "SelfRelay",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Recuperá automáticamente el contexto de trabajo cuando volvés a una página.",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "tabs", "windows", "offscreen"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
+  },
+  "cross_origin_embedder_policy": {
+    "value": "require-corp"
+  },
+  "cross_origin_opener_policy": {
+    "value": "same-origin"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -30,6 +36,6 @@
     {"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle"}
   ],
   "web_accessible_resources": [
-    {"resources": ["fonts/*.woff2", "icons/selfrelay-logo.png"], "matches": ["http://*/*", "https://*/*"]}
+    {"resources": ["fonts/*.woff2", "icons/icon32.png"], "matches": ["http://*/*", "https://*/*"]}
   ]
 }

@@ -9,7 +9,7 @@
 <body class="popup">
   <main class="popup-shell">
     <header class="app-header popup-header">
-      <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
+      <div class="identity"><img class="logo" src="icons/icon32.png" alt=""><span>SelfRelay</span></div>
       <button id="stopTracking" class="header-action" type="button" hidden>Dejar de seguir</button>
     </header>
 
@@ -25,16 +25,20 @@
       </section>
 
       <section id="emptyActions" class="empty-actions" hidden>
-        <button id="createContext" class="primary compact action-with-icon" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7.5h12v9H6z"/><path d="M9 5h6M9 19h6"/></svg>Crear contexto</button>
-        <button id="addTabsEmpty" class="secondary compact" type="button">Elegir varias pestañas</button>
-        <button id="simpleToggle" class="text-button subdued disclosure" type="button">Seguimiento por página o sitio <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
+        <button id="createContext" class="primary primary-context" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7.5h12v9H6z"/><path d="M9 5h6M9 19h6"/></svg><span>Crear contexto</span></button>
+        <button id="addTabsEmpty" class="row-action" type="button"><span class="row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14v10H5z"/><path d="M9 4h6M9 20h6"/><path d="M12 9v6M9 12h6"/></svg></span><span class="row-copy"><strong>Elegir varias pestañas</strong><small>Armá un contexto de trabajo con varias páginas.</small></span><svg class="row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+
+        <button id="simpleToggle" class="disclosure" type="button" aria-expanded="false" aria-controls="simplePanel"><span>Opciones de seguimiento</span><svg class="disclosure-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></button>
         <div id="simplePanel" class="simple-panel" hidden>
-          <div class="segmented small" role="radiogroup" aria-label="Alcance simple">
-            <button type="button" data-scope="tab" role="radio" aria-checked="false">Pestaña</button>
-            <button type="button" data-scope="url" role="radio" aria-checked="true">Página</button>
-            <button type="button" data-scope="site" role="radio" aria-checked="false">Sitio</button>
+          <div class="advanced-label">Alcance</div>
+          <div class="advanced-controls">
+            <div class="segmented small" role="radiogroup" aria-label="Alcance simple">
+              <button type="button" data-scope="tab" role="radio" aria-checked="false">Pestaña</button>
+              <button type="button" data-scope="url" role="radio" aria-checked="true">Página</button>
+              <button type="button" data-scope="site" role="radio" aria-checked="false">Sitio</button>
+            </div>
+            <button id="simpleFollow" class="secondary compact" type="button">Seguir</button>
           </div>
-          <button id="simpleFollow" class="secondary compact" type="button">Seguir</button>
         </div>
       </section>
 
