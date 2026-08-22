@@ -54,6 +54,8 @@ export interface PendingCapture {
 
 export interface BrowserTabSnapshot {
   tabId: number;
+  /** Present for snapshots captured by current extension builds. Optional for backward compatibility with old session data. */
+  windowId?: number;
   contextId: string;
   url: string;
   title: string;
