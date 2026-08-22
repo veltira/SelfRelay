@@ -26,21 +26,23 @@ const selectedTabIds=new Set<number>();
 
 void load();
 
+function setAdvancedOpen(open:boolean){simplePanel.hidden=!open;simpleToggle.setAttribute('aria-expanded',String(open));}
+
 async function load(){
-  clearStatus();tabPicker.hidden=true;
+  clearStatus();tabPicker.hidden=true;setAdvancedOpen(false);
   let state:any;try{state=await chrome.runtime.sendMessage({type:'GET_ACTIVE_STATE'});}catch{renderUnsupported('SelfRelay no pudo leer esta pestaña.');return;}
   if(!state?.supported){renderUnsupported('Esta página no se puede asociar a un contexto.');return;}
   activeContext=state.context||null;activeTabId=state.tab.id;
   const tracked=Boolean(activeContext);
-  stateEl.innerHTML=`<div class="context-status"><span class="status-dot ${tracked?'active':''}" aria-hidden="true"></span><span>${tracked?'Contexto activo':'Pestaña actual'}</span></div><div class="current-title">${escapeHtml(state.tab.title)}</div><div class="current-domain">${escapeHtml(new URL(state.tab.url).hostname)}</div>`;
+  stateEl.innerHTML=`<div class="context-kicker">${tracked?'Contexto activo':'Pestaña actual'}</div><div class="current-title">${escapeHtml(state.tab.title)}</div><div class="current-domain">${escapeHtml(new URL(state.tab.url).hostname)}</div>`;
   stopTracking.hidden=!activeContext;stopTracking.onclick=()=>void stop();
   if(activeContext){emptyActions.hidden=true;worksetSection.hidden=false;renderMembers();addTabs.onclick=()=>void openPicker();}
   else{worksetSection.hidden=true;emptyActions.hidden=false;createContext.onclick=()=>void createSingleWorkset();addTabsEmpty.onclick=()=>void openPicker();}
-  simpleToggle.onclick=()=>{simplePanel.hidden=!simplePanel.hidden;};simpleFollow.onclick=()=>void startSimple();
+  simpleToggle.onclick=()=>setAdvancedOpen(simpleToggle.getAttribute('aria-expanded')!=='true');simpleFollow.onclick=()=>void startSimple();
   for(const button of scopeButtons)button.onclick=()=>{selectedScope=button.dataset.scope as BrowserContextScope;renderScope();};renderScope();
 }
 
-function renderUnsupported(message:string){stateEl.innerHTML=`<div class="context-status"><span class="status-dot"></span><span>SelfRelay</span></div><div class="current-title">Contexto no disponible</div><div class="current-domain">${escapeHtml(message)}</div>`;worksetSection.hidden=true;emptyActions.hidden=true;stopTracking.hidden=true;}
+function renderUnsupported(message:string){stateEl.innerHTML=`<div class="context-kicker">SelfRelay</div><div class="current-title">Contexto no disponible</div><div class="current-domain">${escapeHtml(message)}</div>`;worksetSection.hidden=true;emptyActions.hidden=true;stopTracking.hidden=true;setAdvancedOpen(false);}
 
 function renderMembers(){
   const members=Array.isArray(activeContext?.members)?activeContext.members:[];
@@ -71,9 +73,9 @@ async function saveSelection(){
 
 async function removeMember(memberId:string){setBusy(true);try{const response=await chrome.runtime.sendMessage({type:'REMOVE_WORKSET_MEMBER',contextId:activeContext.id,memberId});if(!response?.ok)throw new Error('remove_failed');await load();}catch{showError('No se pudo quitar la pestaña.');setBusy(false);}}
 async function stop(){if(!activeContext)return;setBusy(true);try{const result=await chrome.runtime.sendMessage({type:'UNTRACK_CONTEXT',contextId:activeContext.id});if(!result?.ok)throw new Error('stop_failed');activeContext=null;await load();}catch{showError('No se pudo dejar de seguir.');setBusy(false);}}
-async function startSimple(){setBusy(true);try{const result=await chrome.runtime.sendMessage({type:'TRACK_CONTEXT',scope:selectedScope});if(!result?.ok)throw new Error('track_failed');simplePanel.hidden=true;await load();}catch{showError('No se pudo iniciar el seguimiento.');setBusy(false);}}
+async function startSimple(){setBusy(true);try{const result=await chrome.runtime.sendMessage({type:'TRACK_CONTEXT',scope:selectedScope});if(!result?.ok)throw new Error('track_failed');setAdvancedOpen(false);await load();}catch{showError('No se pudo iniciar el seguimiento.');setBusy(false);}}
 function renderScope(){for(const button of scopeButtons)button.setAttribute('aria-checked',String(button.dataset.scope===selectedScope));}
-function setBusy(value:boolean){for(const button of [createContext,addTabs,addTabsEmpty,stopTracking,saveTabs,simpleFollow,...scopeButtons])button.disabled=value;for(const input of tabList.querySelectorAll<HTMLInputElement>('input'))input.disabled=value||input.closest('.conflict')!==null;}
+function setBusy(value:boolean){for(const button of [createContext,addTabs,addTabsEmpty,stopTracking,saveTabs,simpleToggle,simpleFollow,...scopeButtons])button.disabled=value;for(const input of tabList.querySelectorAll<HTMLInputElement>('input'))input.disabled=value||input.closest('.conflict')!==null;}
 function showError(message:string){statusEl.textContent=message;statusEl.classList.add('error');}
 function clearStatus(){statusEl.textContent='';statusEl.classList.remove('error');}
 function scopeLabel(scope:string){return scope==='site'?'Sitio completo':scope==='tab'?'Pestaña':'Página exacta';}
