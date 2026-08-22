@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SelfRelay",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Recuperá automáticamente el contexto de trabajo cuando volvés a una página.",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "tabs", "windows", "offscreen"],
