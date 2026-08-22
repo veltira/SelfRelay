@@ -37,7 +37,7 @@ async function load(){
   stateEl.innerHTML=`<div class="context-status"><span class="status-dot ${tracked?'active':''}" aria-hidden="true"></span><span>${tracked?'Contexto activo':'Pestaña actual'}</span></div><div class="current-title">${escapeHtml(state.tab.title)}</div><div class="current-domain">${escapeHtml(new URL(state.tab.url).hostname)}</div>`;
   stopTracking.hidden=!activeContext;stopTracking.onclick=()=>void stop();
   if(activeContext){emptyActions.hidden=true;worksetSection.hidden=false;renderMembers();addTabs.onclick=()=>void openPicker();}
-  else{worksetSection.hidden=false;worksetSection.hidden=true;emptyActions.hidden=false;createContext.onclick=()=>void createSingleWorkset();addTabsEmpty.onclick=()=>void openPicker();}
+  else{worksetSection.hidden=true;emptyActions.hidden=false;createContext.onclick=()=>void createSingleWorkset();addTabsEmpty.onclick=()=>void openPicker();}
   simpleToggle.onclick=()=>setSimpleDisclosure(simpleToggle.getAttribute('aria-expanded')!=='true');
   simpleFollow.onclick=()=>void startSimple();
   for(const button of scopeButtons)button.onclick=()=>{selectedScope=button.dataset.scope as BrowserContextScope;renderScope();};renderScope();
