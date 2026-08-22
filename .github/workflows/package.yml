@@ -1,0 +1,80 @@
+name: SelfRelay Packaging
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  package-chrome:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - name: Validate compiled extension
+        run: |
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('apps/extension/dist/manifest.json','utf8')); if(m.manifest_version!==3||m.name!=='SelfRelay') process.exit(1);"
+          test -f apps/extension/dist/background.js
+          test -f apps/extension/dist/checkpoint.html
+          test -f apps/extension/dist/checkpoint.js
+          test -f apps/extension/dist/content.js
+          test -f apps/extension/dist/popup.html
+          test -f apps/extension/dist/popup.js
+          test -f apps/extension/dist/icons/icon16.png
+          test -f apps/extension/dist/icons/icon32.png
+          test -f apps/extension/dist/icons/icon48.png
+          test -f apps/extension/dist/icons/icon128.png
+      - name: Create SelfRelay-Chrome.zip
+        run: |
+          rm -f SelfRelay-Chrome.zip
+          cd apps/extension/dist
+          zip -qr ../../../SelfRelay-Chrome.zip .
+      - name: Validate ZIP layout
+        run: |
+          unzip -t SelfRelay-Chrome.zip
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'manifest.json'
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'background.js'
+          unzip -Z1 SelfRelay-Chrome.zip | grep -qx 'icons/icon128.png'
+          if unzip -Z1 SelfRelay-Chrome.zip | grep -q '^apps/extension/dist/'; then
+            echo 'ZIP must contain the extension directly, not the repository path.' >&2
+            exit 1
+          fi
+      - name: Upload Chrome package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Chrome-package
+          path: SelfRelay-Chrome.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package-chrome
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged Chrome extension
+        uses: actions/download-artifact@v4
+        with:
+          name: SelfRelay-Chrome-package
+          path: release
+      - name: Publish GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/SelfRelay-Chrome.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/SelfRelay-Chrome.zip --verify-tag --generate-notes --title "SelfRelay $GITHUB_REF_NAME"
+          fi
