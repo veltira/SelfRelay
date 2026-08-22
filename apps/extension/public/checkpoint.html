@@ -8,58 +8,65 @@
 </head>
 <body class="capture">
   <main class="capture-shell">
-    <header class="app-header">
+    <header class="app-header capture-header">
       <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
     </header>
 
-    <section class="capture-intro">
-      <h1 id="title">¿Dónde quedaste?</h1>
-      <p id="meta" class="context-meta"></p>
-    </section>
+    <div class="capture-body">
+      <section class="capture-intro">
+        <h1 id="title">¿Dónde quedaste?</h1>
+        <p id="meta" class="context-meta"></p>
+      </section>
 
-    <section id="composer" class="composer">
-      <label class="sr-only" for="text">Contexto para retomar</label>
-      <textarea id="text" maxlength="12000" rows="6" placeholder="Qué estabas haciendo y cuál es el siguiente paso…"></textarea>
-      <div class="composer-toolbar">
-        <button id="record" class="icon-action" type="button" aria-label="Grabar audio" title="Grabar audio">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.25a3.75 3.75 0 0 0 3.75-3.75v-5a3.75 3.75 0 0 0-7.5 0v5A3.75 3.75 0 0 0 12 15.25Z"/><path d="M5.75 11.25v.25a6.25 6.25 0 0 0 12.5 0v-.25M12 17.75v3M9.25 20.75h5.5"/></svg>
-          <span>Grabar audio</span>
+      <section id="composer" class="composer">
+        <label class="sr-only" for="text">Contexto para retomar</label>
+        <textarea id="text" maxlength="12000" rows="5" placeholder="Dejá la pista que necesitás para continuar después…"></textarea>
+        <div class="composer-toolbar">
+          <button id="record" class="tool-action" type="button" aria-label="Grabar audio" title="Grabar audio">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.25a3.75 3.75 0 0 0 3.75-3.75v-5a3.75 3.75 0 0 0-7.5 0v5A3.75 3.75 0 0 0 12 15.25Z"/><path d="M5.75 11.25v.25a6.25 6.25 0 0 0 12.5 0v-.25M12 17.75v3M9.25 20.75h5.5"/></svg>
+            <span>Grabar audio</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="recording" class="recording-panel" hidden aria-live="polite">
+        <div class="recording-line">
+          <span class="record-dot" aria-hidden="true"></span><strong>Grabando</strong><time id="timer">00:00</time>
+          <div id="levelMeter" class="level-meter" aria-label="Nivel de audio"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="inline-actions">
+          <button id="cancelRecording" class="text-button" type="button">Cancelar</button>
+          <button id="stopRecording" class="secondary compact" type="button">Detener</button>
+        </div>
+      </section>
+
+      <section id="audioReview" class="audio-review" hidden>
+        <div class="review-topline">
+          <div><strong>Audio listo</strong><span id="audioDuration" class="helper inline-helper"></span></div>
+          <button id="redoRecording" class="text-button" type="button">Volver a grabar</button>
+        </div>
+        <audio id="preview" controls preload="metadata"></audio>
+      </section>
+
+      <section id="checkpointTargets" class="target-section" hidden aria-labelledby="targetHeading">
+        <div class="target-heading"><strong id="targetHeading">Guardar para</strong></div>
+        <div class="target-choice-row" role="radiogroup" aria-label="Destino del checkpoint">
+          <button id="targetClosed" class="target-choice" type="button" role="radio" aria-checked="true">Esta pestaña</button>
+          <button id="targetAll" class="target-choice" type="button" role="radio" aria-checked="false">Todo el contexto</button>
+          <button id="targetCustom" class="target-choice target-choice-secondary" type="button" role="radio" aria-checked="false">Elegir…</button>
+        </div>
+        <div id="targetList" class="target-list" hidden></div>
+      </section>
+
+      <div id="status" role="status" class="status capture-status"></div>
+      <footer class="capture-actions">
+        <button id="skip" class="text-button" type="button">No guardar</button>
+        <button id="save" class="primary compact save-button" type="button">
+          <span>Guardar checkpoint</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
         </button>
-      </div>
-    </section>
-
-    <section id="recording" class="recording-panel" hidden aria-live="polite">
-      <div class="recording-line">
-        <span class="record-dot" aria-hidden="true"></span><strong>Grabando</strong><time id="timer">00:00</time>
-        <div id="levelMeter" class="level-meter" aria-label="Nivel de audio"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-      </div>
-      <div class="inline-actions">
-        <button id="cancelRecording" class="text-button" type="button">Cancelar</button>
-        <button id="stopRecording" class="secondary compact" type="button">Detener</button>
-      </div>
-    </section>
-
-    <section id="audioReview" class="audio-review" hidden>
-      <div class="review-topline">
-        <div><strong>Audio</strong><span id="audioDuration" class="helper"></span></div>
-        <button id="redoRecording" class="text-button" type="button">Volver a grabar</button>
-      </div>
-      <audio id="preview" controls preload="metadata"></audio>
-    </section>
-
-    <section id="checkpointTargets" class="target-section" hidden>
-      <div class="target-row">
-        <div><strong>Mostrar al volver</strong><span class="helper">Por defecto, en cualquier pestaña del contexto.</span></div>
-        <button id="chooseTargets" class="text-button" type="button">Elegir pestañas</button>
-      </div>
-      <div id="targetList" class="target-list" hidden></div>
-    </section>
-
-    <div id="status" role="status" class="status capture-status"></div>
-    <footer class="capture-actions">
-      <button id="skip" class="text-button" type="button">No guardar</button>
-      <button id="save" class="primary compact save-button" type="button">Guardar checkpoint</button>
-    </footer>
+      </footer>
+    </div>
   </main>
   <script type="module" src="checkpoint.js"></script>
 </body>
