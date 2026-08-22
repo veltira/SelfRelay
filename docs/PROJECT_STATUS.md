@@ -8,40 +8,51 @@ Its core loop is:
 
 **context → exit → checkpoint → return → automatic recovery**
 
-## Verified inherited state
+## Reconstructed source state
 
-The inherited project previously reported:
+The preserved implementation in `artifacts/chrome-extension-unpacked/` has been inspected file-by-file and its text-checkpoint behavior is now reconstructed as maintainable TypeScript under `apps/extension`.
 
-- Monorepo with `apps/extension`, `apps/desktop`, `apps/web`, `packages/shared`, `supabase`, and `docs`.
-- Chrome Extension Manifest V3.
+The official source now includes:
+
+- Chrome Extension Manifest V3 source/build pipeline.
 - Tracking by tab, exact URL, or site.
+- Minimal snapshots only for explicitly followed contexts.
 - Pending checkpoint creation on `tabs.onRemoved`.
-- Text checkpoint capture.
-- Automatic checkpoint recovery when returning to the matching context.
-- Resolve action and checkpoint history.
-- Full-window-close fallback intended to preserve pending capture and recover it at next startup.
-- Shared `Context` and `Checkpoint` models.
-- Local-first architecture.
-- Reported validation: `npm run check` PASS, TypeScript build PASS, extension build PASS, tests 6/6 PASS.
-- Reported inherited local Git SHA: `9ae55515beac6259cd8aeabe23ec83b4dd36b449`.
+- Text checkpoint capture with discard/save paths.
+- Automatic recovery of the latest unresolved checkpoint when returning to the matching context.
+- Resolve action and checkpoint history service-worker capability.
+- Full-window-close behavior that persists the pending capture without forcing Chrome to reopen.
+- Startup fallback that surfaces the oldest pending capture.
+- Shared `Context` and `Checkpoint` models in `packages/shared`.
+- Local-first storage; no backend/sync dependency.
+- CI running typecheck, 6 parity/core tests and extension build.
 
-## Current GitHub state
+The historical local SHA `9ae55515beac6259cd8aeabe23ec83b4dd36b449` remains historical context only; this GitHub repository is now the canonical source.
 
-The original source monorepo has not yet been recovered into this repository. The only recovered executable material is the unpacked compiled Chrome extension, preserved in `artifacts/chrome-extension-unpacked/`.
+## Validation completed
 
-Do not treat compiled JavaScript as the canonical source if the original source ZIP or Git bundle can be recovered.
+The reconstructed code has automated coverage for:
 
-## Immediate priorities
+1. URL normalization and supported-scheme rejection.
+2. Tab/URL/site matching and specificity.
+3. `follow → close → capture → save → return → automatic recovery → resolve`.
+4. Full-window close persisting capture without a popup.
+5. Startup surfacing the oldest pending capture.
+6. Unsupported browser pages not being tracked.
 
-1. Recover/import the original source monorepo or Git bundle.
-2. Verify the real Chrome flow: close tab → capture → save → return → automatic recovery.
-3. Verify full Chrome close → pending capture recovered on next startup.
-4. Polish extension UX.
-5. Add audio checkpoints.
-6. Build the Desktop MVP before the CoderCup final demo.
+CI must remain green before parity work is considered safe to merge.
+
+## Next priorities
+
+1. Validate the rebuilt `apps/extension/dist` in a normal Chrome installation against the preserved artifact.
+2. Harden full-browser-close recovery, including duplicate-pending prevention during multi-tab/window shutdown.
+3. Apply SelfRelay branding and UX polish without changing the mechanic.
+4. Add local audio checkpoints.
+5. Build the mandatory Desktop MVP.
+6. Align Extension/Desktop behavior and design language.
 
 ## Explicitly deferred
 
-- Supabase/backend unless it materially improves the demo.
+- Supabase/backend/sync unless it materially improves an already-solid local MVP.
 - Mobile beyond roadmap.
-- Any invasive screen monitoring or indiscriminate capture.
+- Any invasive screen monitoring, indiscriminate capture or hidden microphone use.
