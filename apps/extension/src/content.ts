@@ -10,38 +10,55 @@ async function lookup(){
 
 function render(result:any){
   const checkpoint=result.checkpoint;
-  const host=document.createElement('div');
-  host.id=ROOT_ID;
-  host.style.cssText='all:initial;position:fixed;z-index:2147483647;right:18px;top:18px;width:min(390px,calc(100vw - 28px));font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;color:#172033;';
+  const context=result.context;
+  const host=document.createElement('div');host.id=ROOT_ID;
+  host.style.cssText='all:initial;position:fixed;z-index:2147483647;right:16px;top:16px;width:min(372px,calc(100vw - 24px));font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#151a23;';
   const shadow=host.attachShadow({mode:'open'});
-  shadow.innerHTML=`
-    <style>
-      :host{all:initial}.card{box-sizing:border-box;background:#fff;border:1px solid #d8e0ea;border-radius:10px;box-shadow:0 16px 38px rgba(15,23,42,.18),0 2px 7px rgba(15,23,42,.08);padding:0;color:#172033;overflow:hidden}
-      .top{height:39px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #e4e9f0}.brand{font-size:12px;font-weight:720;letter-spacing:-.01em;color:#111c31}.return{font-size:10.5px;font-weight:650;color:#526176}.content{padding:14px}.eyebrow{font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:#0891b2}.title{font-size:16px;font-weight:720;letter-spacing:-.018em;color:#111c31;margin:4px 0 10px}.body{white-space:pre-wrap;font-size:13.5px;line-height:1.5;margin:0;color:#253247}.note{margin-top:10px;padding-top:9px;border-top:1px solid #e8edf3}.note-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#7a8799}.note-text{white-space:pre-wrap;margin:4px 0 0;font-size:12px;line-height:1.45;color:#536176}.meta{font-size:10.5px;color:#8793a4;margin-top:11px}.audio{display:inline-flex;align-items:center;gap:6px;margin-top:11px;border:1px solid #cbd6e5;background:#f8fafc;color:#31516c;border-radius:7px;padding:6px 9px;font:650 11.5px inherit;cursor:pointer}.audio:hover{background:#edf4ff;border-color:#b9cbea;color:#1e55c5}.audio svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.status{min-height:0;margin-top:7px;font-size:10.5px;color:#b42318}.actions{display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;background:#f8fafc;border-top:1px solid #e5eaf1}.btn{appearance:none;min-height:31px;border:1px solid #c9d3df;background:#fff;color:#4b586c;border-radius:7px;padding:6px 10px;font:650 11.5px inherit;cursor:pointer}.btn:hover{background:#f1f5f9}.primary{background:#2463eb;border-color:#2463eb;color:#fff}.primary:hover{background:#1d4ed8;border-color:#1d4ed8}.btn:focus-visible,.audio:focus-visible{outline:2px solid #5d8ff3;outline-offset:2px}@media(max-width:520px){:host{right:12px!important;top:12px!important;width:calc(100vw - 24px)!important}}
-    </style>
-    <div class="card" role="dialog" aria-label="Checkpoint pendiente de SelfRelay">
-      <div class="top"><span class="brand">SelfRelay</span><span class="return">Volviste a este contexto</span></div>
-      <div class="content"><div class="eyebrow">Tu último checkpoint</div><div class="title">Retomá desde acá</div><p class="body"></p><div class="note" hidden><div class="note-label">Nota escrita</div><p class="note-text"></p></div><button class="audio" data-action="audio" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5v11l9-5.5-9-5.5Z"/></svg>Escuchar audio</button><div class="meta"></div><div class="status" role="status"></div></div>
-      <div class="actions"><button class="btn" data-action="dismiss">Ahora no</button><button class="btn primary" data-action="resolve">Ya lo retomé</button></div>
-    </div>`;
-  const body=shadow.querySelector<HTMLElement>('.body')!;
-  const note=shadow.querySelector<HTMLElement>('.note')!;
-  const noteText=shadow.querySelector<HTMLElement>('.note-text')!;
-  const transcript=String(checkpoint.transcript||'').trim();
-  const typed=String(checkpoint.originalText||'').trim();
-  body.textContent=transcript||typed||(checkpoint.audioRef?'Dejaste un checkpoint de audio.':'Tu checkpoint está listo para retomar.');
-  if(transcript&&typed&&typed!==transcript){note.hidden=false;noteText.textContent=typed;}
+  const fontRegular=chrome.runtime.getURL('fonts/IBMPlexSans-Regular.woff2');
+  const fontMedium=chrome.runtime.getURL('fonts/IBMPlexSans-Medium.woff2');
+  shadow.innerHTML=`<style>
+    @font-face{font-family:"IBM Plex Sans";src:url("${fontRegular}") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+    @font-face{font-family:"IBM Plex Sans";src:url("${fontMedium}") format("woff2");font-weight:500 700;font-style:normal;font-display:swap}
+    :host{all:initial}.panel{box-sizing:border-box;background:#fff;border:1px solid #cfd5de;border-radius:8px;box-shadow:0 8px 22px rgba(15,23,42,.13);color:#151a23;overflow:hidden}.head{display:flex;align-items:center;justify-content:space-between;height:38px;padding:0 12px;border-bottom:1px solid #e4e7ec}.brand{font-size:12px;font-weight:650;letter-spacing:-.01em}.context{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:#687384}.body{padding:12px}.label{font-size:10.5px;color:#687384;margin-bottom:5px}.text{white-space:pre-wrap;margin:0;font-size:13.5px;line-height:1.48;color:#202733}.typed{white-space:pre-wrap;margin:8px 0 0;padding-top:8px;border-top:1px solid #e7eaf0;font-size:11.5px;line-height:1.45;color:#697385}.media,.context-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.action{appearance:none;border:1px solid #c9d0da;background:#fff;color:#364152;border-radius:6px;padding:5px 8px;font:500 11.5px "IBM Plex Sans",sans-serif;cursor:pointer}.action:hover{background:#f5f7fa;border-color:#b7c0cd}.action svg{width:13px;height:13px;vertical-align:-2px;margin-right:4px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.transcript-editor{display:block;width:100%;min-height:68px;box-sizing:border-box;margin-top:8px;border:1px solid #cfd5de;border-radius:6px;padding:8px;background:#fff;color:#202733;font:400 13px/1.45 "IBM Plex Sans",sans-serif;resize:vertical}.save-edit{margin-top:6px}.meta{font-size:10px;color:#87909d;margin-top:10px}.status{font-size:10.5px;color:#687384;margin-top:7px}.status.error{color:#b42318}.foot{display:flex;justify-content:flex-end;gap:6px;padding:9px 12px;border-top:1px solid #e4e7ec;background:#fafbfc}.btn{appearance:none;min-height:29px;border:1px solid #c9d0da;background:#fff;color:#465164;border-radius:6px;padding:5px 9px;font:500 11.5px "IBM Plex Sans",sans-serif;cursor:pointer}.btn:hover{background:#f4f6f8}.primary{background:#2563eb;border-color:#2563eb;color:#fff}.primary:hover{background:#1d4ed8}.btn:focus-visible,.action:focus-visible,.transcript-editor:focus-visible{outline:2px solid #4f7ff0;outline-offset:2px}.spinner{display:inline-block;width:10px;height:10px;margin-right:5px;border:1.5px solid #c6ced9;border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:520px){:host{right:12px!important;top:12px!important;width:calc(100vw - 24px)!important}}
+  </style><div class="panel" role="dialog" aria-label="Checkpoint pendiente de SelfRelay"><div class="head"><span class="brand">SelfRelay</span><span class="context"></span></div><div class="body"><div class="label">Al volver</div><div class="main-content"></div><div class="media"></div><div class="context-actions"></div><div class="meta"></div><div class="status" role="status"></div></div><div class="foot"><button class="btn" data-action="dismiss">Ahora no</button><button class="btn primary" data-action="resolve">Ya lo retomé</button></div></div>`;
+  shadow.querySelector<HTMLElement>('.context')!.textContent=context.members?.length?`${context.members.length} pestañas`:new URL(location.href).hostname;
+  const main=shadow.querySelector<HTMLElement>('.main-content')!;
+  const media=shadow.querySelector<HTMLElement>('.media')!;
+  const contextActions=shadow.querySelector<HTMLElement>('.context-actions')!;
+  const status=shadow.querySelector<HTMLElement>('.status')!;
+  const transcript=String(checkpoint.transcript||'').trim();const typed=String(checkpoint.originalText||'').trim();
+
+  function renderContent(currentTranscript:string){
+    main.innerHTML='';
+    if(currentTranscript){
+      const editor=document.createElement('textarea');editor.className='transcript-editor';editor.value=currentTranscript;editor.setAttribute('aria-label','Transcripción del checkpoint');main.append(editor);
+      const saveEdit=document.createElement('button');saveEdit.className='action save-edit';saveEdit.textContent='Guardar cambios';saveEdit.hidden=true;main.append(saveEdit);
+      editor.oninput=()=>{saveEdit.hidden=editor.value.trim()===currentTranscript.trim();};
+      saveEdit.onclick=async()=>{saveEdit.disabled=true;const response=await chrome.runtime.sendMessage({type:'UPDATE_CHECKPOINT_TRANSCRIPT',checkpointId:checkpoint.id,text:editor.value});if(response?.ok){currentTranscript=editor.value.trim();saveEdit.hidden=true;status.textContent='Transcripción actualizada.';}else{status.textContent='No se pudo guardar el cambio.';status.classList.add('error');}saveEdit.disabled=false;};
+      if(typed&&typed!==currentTranscript){const note=document.createElement('p');note.className='typed';note.textContent=typed;main.append(note);}
+    }else if(typed){const body=document.createElement('p');body.className='text';body.textContent=typed;main.append(body);}
+    else{const body=document.createElement('p');body.className='text';body.textContent='Dejaste un checkpoint de audio.';main.append(body);}
+  }
+  renderContent(transcript);
+
+  if(checkpoint.audioRef){
+    const listen=button('Escuchar','<path d="M9 6.5v11l9-5.5-9-5.5Z"/>');listen.onclick=async()=>{const response=await chrome.runtime.sendMessage({type:'OPEN_AUDIO_PLAYER',audioRef:checkpoint.audioRef});if(!response?.ok)setError('El audio no se pudo abrir.');};media.append(listen);
+    if(!transcript){
+      const transcribe=button('Transcribir audio','<path d="M4 7h16M4 12h12M4 17h9"/>');media.append(transcribe);
+      transcribe.onclick=async()=>{transcribe.disabled=true;status.classList.remove('error');let seconds=0;status.innerHTML='<span class="spinner"></span>Transcribiendo…';const timer=window.setInterval(()=>{seconds++;status.innerHTML=`<span class="spinner"></span>Transcribiendo… ${seconds}s`;},1000);try{const response=await chrome.runtime.sendMessage({type:'TRANSCRIBE_CHECKPOINT',checkpointId:checkpoint.id,language:navigator.language||'es'});if(!response?.ok)throw new Error('failed');checkpoint.transcript=response.checkpoint.transcript;checkpoint.transcriptionEngine=response.checkpoint.transcriptionEngine;renderContent(String(checkpoint.transcript||''));transcribe.remove();status.textContent='';}catch{setError('No se pudo transcribir.');transcribe.textContent='Intentar otra vez';transcribe.disabled=false;}finally{clearInterval(timer);}};
+    }
+  }
+
+  if(Array.isArray(context.members)&&context.members.length){void (async()=>{const state=await chrome.runtime.sendMessage({type:'GET_CONTEXT_TAB_STATE',contextId:context.id});const missing=Array.isArray(state?.missing)?state.missing:[];if(!missing.length)return;const restore=button(`Abrir ${missing.length} ${missing.length===1?'pestaña restante':'pestañas restantes'}`,'<path d="M12 5v14M5 12h14"/>');contextActions.append(restore);restore.onclick=async()=>{restore.disabled=true;const response=await chrome.runtime.sendMessage({type:'OPEN_MISSING_CONTEXT_TABS',contextId:context.id});if(response?.ok)restore.remove();else{restore.disabled=false;setError('No se pudieron abrir las pestañas.');}};})();}
+
   shadow.querySelector<HTMLElement>('.meta')!.textContent=`Guardado ${formatDate(checkpoint.createdAt)}`;
-  const audioButton=shadow.querySelector<HTMLButtonElement>('[data-action="audio"]')!;
-  if(checkpoint.audioRef){audioButton.hidden=false;audioButton.onclick=async()=>{const response=await chrome.runtime.sendMessage({type:'OPEN_AUDIO_PLAYER',audioRef:checkpoint.audioRef});if(!response?.ok)shadow.querySelector<HTMLElement>('.status')!.textContent='El audio no se pudo abrir.';};}
   shadow.querySelector<HTMLButtonElement>('[data-action="dismiss"]')!.onclick=()=>host.remove();
-  shadow.querySelector<HTMLButtonElement>('[data-action="resolve"]')!.onclick=async event=>{
-    const button=event.currentTarget as HTMLButtonElement;button.disabled=true;
-    const response=await chrome.runtime.sendMessage({type:'RESOLVE_CHECKPOINT',checkpointId:checkpoint.id});
-    if(response?.ok){host.remove();return;}
-    button.disabled=false;shadow.querySelector<HTMLElement>('.status')!.textContent='No se pudo cerrar el checkpoint. Probá de nuevo.';
-  };
+  shadow.querySelector<HTMLButtonElement>('[data-action="resolve"]')!.onclick=async event=>{const resolveButton=event.currentTarget as HTMLButtonElement;resolveButton.disabled=true;const response=await chrome.runtime.sendMessage({type:'RESOLVE_CHECKPOINT',checkpointId:checkpoint.id});if(response?.ok){host.remove();window.setTimeout(()=>void lookup(),50);return;}resolveButton.disabled=false;setError('No se pudo cerrar el checkpoint.');};
   document.documentElement.append(host);
+
+  function setError(message:string){status.textContent=message;status.classList.add('error');}
+  function button(label:string,svg:string){const element=document.createElement('button');element.className='action';element.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>${escapeHtml(label)}`;return element;}
 }
 
 function formatDate(raw:string){try{return new Intl.DateTimeFormat('es-UY',{dateStyle:'medium',timeStyle:'short'}).format(new Date(raw));}catch{return'';}}
+function escapeHtml(value:string){return String(value).replace(/[&<>'\"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]!));}
