@@ -79,8 +79,9 @@ async function refreshPendingView(fromUpdate=false){
   members=mergeTargetMembers(Array.isArray(context?.members)?context.members:[],closed);
   closedMemberIds=[...new Set(closed.map(item=>item.memberId).filter((id:any):id is string=>Boolean(id)))];
   if(!targetTouched){
+    const hasExplicitDefault=Object.prototype.hasOwnProperty.call(result.pending,'defaultTargetMemberIds');
     const defaultTargets=Array.isArray(result.pending.defaultTargetMemberIds)?result.pending.defaultTargetMemberIds:null;
-    targetMode=result.pending.defaultTargetMemberIds===null?'all':defaultTargets?.length?'closed':members.length>1&&closedMemberIds.length?'closed':'all';
+    targetMode=!hasExplicitDefault?'all':result.pending.defaultTargetMemberIds===null?'all':defaultTargets?.length?'closed':members.length>1&&closedMemberIds.length?'closed':'all';
     selectedTargets.clear();for(const id of defaultTargets?.length?defaultTargets:closedMemberIds)selectedTargets.add(id);
   }else if(fromUpdate&&targetMode==='closed'){
     selectedTargets.clear();for(const id of closedMemberIds)selectedTargets.add(id);
