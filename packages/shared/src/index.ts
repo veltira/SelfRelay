@@ -50,6 +50,8 @@ export interface PendingCapture {
   url: string;
   title: string;
   closedAt: string;
+  /** Internal idempotency key used to avoid duplicate shutdown recovery. */
+  sourceKey?: string;
 }
 
 export interface BrowserTabSnapshot {
