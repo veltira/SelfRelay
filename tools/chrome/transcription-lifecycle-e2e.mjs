@@ -29,13 +29,7 @@ async function waitForServiceWorker(extensionId=''){
 }
 
 async function openPopup(extensionId){
-  const url=`chrome-extension://${extensionId}/popup.html`;let lastError=null;
-  for(let attempt=0;attempt<30;attempt++){
-    const page=await context.newPage();
-    try{await page.goto(url,{waitUntil:'domcontentloaded',timeout:5000});await page.waitForFunction(()=>Boolean(globalThis.chrome?.runtime?.id),null,{timeout:5000});return page;}
-    catch(error){lastError=error;await page.close().catch(()=>{});const message=String(error?.message||error);if(!/ERR_BLOCKED_BY_CLIENT|ERR_FAILED|Target page, context or browser has been closed/i.test(message))throw error;await new Promise(resolveDelay=>setTimeout(resolveDelay,500));}
-  }
-  throw lastError||new Error('extension_popup_not_ready_after_reload');
+  const page=await context.newPage();await page.goto(`chrome-extension://${extensionId}/popup.html`,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>Boolean(globalThis.chrome?.runtime?.id),null,{timeout:10000});return page;
 }
 
 async function resetState(page){await page.evaluate(async()=>{await chrome.storage.local.clear();await chrome.storage.session.clear();const indexedDBApi=globalThis.indexedDB;if(indexedDBApi?.databases){for(const db of await indexedDBApi.databases())if(db.name)await new Promise(resolveDelete=>{const request=indexedDBApi.deleteDatabase(db.name);request.onsuccess=request.onerror=request.onblocked=()=>resolveDelete();});}});}
@@ -61,14 +55,26 @@ async function transcribeThroughRecovery(popup,{key,url}){
   return{checkpointId:seeded.checkpointId,transcript:String(stored.transcript).trim(),engine:stored.transcriptionEngine,blobSize:seeded.blobSize};
 }
 
+function extensionsStateScript(extensionId){
+  const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);let item=null;while(queue.length&&!item){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId){item=child;break;}if(child.shadowRoot)queue.push(child.shadowRoot);}}
+  const data=item?.data||null;const normalize=items=>Array.isArray(items)?items.map(error=>({message:String(error?.message||error?.error||error?.stackTrace||error?.source||error),source:String(error?.source||''),severity:String(error?.severity||''),type:String(error?.type||'')})):[];
+  return{manager,item,data,publicState:{found:Boolean(item),name:data?.name||null,state:data?.state||null,runtimeErrors:normalize(data?.runtimeErrors),manifestErrors:normalize(data?.manifestErrors),itemText:item?.shadowRoot?.textContent?.replace(/\s+/g,' ').trim().slice(0,1200)||''}};
+}
+
 async function inspectExtensionsPage(extensionId){
-  const page=await context.newPage();await page.goto('chrome://extensions/');await page.waitForTimeout(1000);
-  const result=await page.evaluate(extensionId=>{
-    const visit=root=>{const queue=[root];while(queue.length){const current=queue.shift();if(!current)continue;for(const child of current.querySelectorAll?.('*')||[]){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId)return child;if(child.shadowRoot)queue.push(child.shadowRoot);}}return null;};
-    const item=visit(document),data=item?.data||null;const normalize=items=>Array.isArray(items)?items.map(error=>({message:String(error?.message||error?.error||error?.stackTrace||error?.source||error),source:String(error?.source||''),severity:String(error?.severity||''),type:String(error?.type||'')})):[];
-    return{found:Boolean(item),name:data?.name||null,state:data?.state||null,runtimeErrors:normalize(data?.runtimeErrors),manifestErrors:normalize(data?.manifestErrors),itemText:item?.shadowRoot?.textContent?.replace(/\s+/g,' ').trim().slice(0,1200)||''};
-  },extensionId);
+  const page=await context.newPage();await page.goto('chrome://extensions/');await page.waitForFunction(id=>Boolean(document.querySelector('extensions-manager')?.shadowRoot),extensionId,{timeout:10000});await page.waitForTimeout(500);
+  const result=await page.evaluate(extensionId=>extensionsStateScript(extensionId).publicState,extensionId).catch(async()=>page.evaluate(extensionId=>{
+    const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);let item=null;while(queue.length&&!item){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId){item=child;break;}if(child.shadowRoot)queue.push(child.shadowRoot);}}const data=item?.data||null;const normalize=items=>Array.isArray(items)?items.map(error=>({message:String(error?.message||error?.error||error?.stackTrace||error?.source||error),source:String(error?.source||''),severity:String(error?.severity||''),type:String(error?.type||'')})):[];return{found:Boolean(item),name:data?.name||null,state:data?.state||null,runtimeErrors:normalize(data?.runtimeErrors),manifestErrors:normalize(data?.manifestErrors),itemText:item?.shadowRoot?.textContent?.replace(/\s+/g,' ').trim().slice(0,1200)||''};},extensionId));
   await page.close();if(!result.found)throw new Error(`chrome_extensions_item_not_found:${JSON.stringify(result)}`);if(result.runtimeErrors.length||result.manifestErrors.length)throw new Error(`chrome_extensions_selfrelay_errors:${JSON.stringify(result)}`);return result;
+}
+
+async function reloadThroughExtensionsPage(extensionId){
+  const page=await context.newPage();await page.goto('chrome://extensions/');await page.waitForFunction(()=>Boolean(document.querySelector('extensions-manager')?.shadowRoot),null,{timeout:10000});
+  await page.evaluate(()=>{const manager=document.querySelector('extensions-manager'),toolbar=manager?.shadowRoot?.querySelector('extensions-toolbar'),toggle=toolbar?.shadowRoot?.querySelector('#devMode');if(!toggle)throw new Error('chrome_extensions_dev_mode_toggle_missing');if(!toggle.checked)toggle.click();});
+  await page.waitForFunction(extensionId=>{const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);while(queue.length){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId)return Boolean(child.shadowRoot?.querySelector('#dev-reload-button'));if(child.shadowRoot)queue.push(child.shadowRoot);}}return false;},extensionId,{timeout:10000});
+  const clicked=await page.evaluate(extensionId=>{const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);while(queue.length){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId){const button=child.shadowRoot?.querySelector('#dev-reload-button');if(!button)return false;button.click();return true;}if(child.shadowRoot)queue.push(child.shadowRoot);}}return false;},extensionId);if(!clicked)throw new Error('chrome_extensions_reload_button_missing');
+  await page.waitForFunction(extensionId=>{const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);while(queue.length){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId)return child.data?.state==='ENABLED'&&!child.data?.disableReasons?.reloading;if(child.shadowRoot)queue.push(child.shadowRoot);}}return false;},extensionId,{timeout:30000});await page.waitForTimeout(750);
+  const result=await page.evaluate(extensionId=>{const manager=document.querySelector('extensions-manager');const queue=[manager?.shadowRoot].filter(Boolean);let item=null;while(queue.length&&!item){const root=queue.shift();for(const child of root.querySelectorAll('*')){if(child.tagName==='EXTENSIONS-ITEM'&&child.data?.id===extensionId){item=child;break;}if(child.shadowRoot)queue.push(child.shadowRoot);}}const data=item?.data||null;const normalize=items=>Array.isArray(items)?items.map(error=>({message:String(error?.message||error?.error||error?.stackTrace||error?.source||error),source:String(error?.source||''),severity:String(error?.severity||''),type:String(error?.type||'')})):[];return{found:Boolean(item),name:data?.name||null,state:data?.state||null,runtimeErrors:normalize(data?.runtimeErrors),manifestErrors:normalize(data?.manifestErrors)};},extensionId);await page.close();if(!result.found||result.state!=='ENABLED'||result.runtimeErrors.length||result.manifestErrors.length)throw new Error(`chrome_extensions_reload_failed:${JSON.stringify(result)}`);return result;
 }
 
 try{
@@ -77,7 +83,7 @@ try{
   if(first.transcript.length<8||second.transcript.length<8)throw new Error(`same_session_transcript_too_short:${JSON.stringify({first,second})}`);
   console.log(`Same-session transcript A: ${first.transcript}`);console.log(`Same-session transcript B: ${second.transcript}`);console.log(`chrome://extensions before reload: ${JSON.stringify(beforeReload)}`);
 
-  const oldWorker=serviceWorker;try{await popup.evaluate(()=>chrome.runtime.reload());}catch{}await popup.close().catch(()=>{});await oldWorker.waitForEvent('close',{timeout:15000}).catch(()=>{});popup=await openPopup(extensionId);serviceWorker=await waitForServiceWorker(extensionId);
+  const oldWorker=serviceWorker;await popup.close().catch(()=>{});const reloadState=await reloadThroughExtensionsPage(extensionId);await oldWorker.waitForEvent('close',{timeout:15000}).catch(()=>{});serviceWorker=await waitForServiceWorker(extensionId);popup=await openPopup(extensionId);console.log(`chrome://extensions reload action: ${JSON.stringify(reloadState)}`);
   const afterReload=await transcribeThroughRecovery(popup,{key:'reload',url:workUrl('reload')});const afterReloadExtensions=await inspectExtensionsPage(extensionId);if(afterReload.transcript.length<8)throw new Error(`reload_transcript_too_short:${JSON.stringify(afterReload)}`);
   console.log(`Post-reload transcript: ${afterReload.transcript}`);console.log(`chrome://extensions after reload: ${JSON.stringify(afterReloadExtensions)}`);
 
