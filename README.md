@@ -1,76 +1,74 @@
 # SelfRelay
 
-SelfRelay reduces the cost of resuming interrupted work.
+SelfRelay reduce el costo de retomar trabajo interrumpido.
 
-**context → exit → checkpoint → return → automatic recovery**
+**contexto → salida → checkpoint → regreso → recuperación automática**
 
-This repository is the canonical source repository for the CoderCup AI 2026 project.
+Este repositorio contiene el código fuente canónico del proyecto SelfRelay para CoderCup AI 2026. El ZIP automático del código fuente de GitHub **no es el producto que debe descargar un usuario**.
 
-## Download SelfRelay
+## Descargar SelfRelay
 
-End users and evaluators should **not** download the repository source ZIP or build SelfRelay themselves.
+La distribución para usuarios se realiza mediante **GitHub Releases** y cada plataforma tiene su propio archivo:
 
-User-ready builds belong in **GitHub Releases** and are intentionally separated by platform:
-
-| Product | Download asset | Status |
+| Producto | Archivo de distribución | Estado |
 | --- | --- | --- |
-| Chrome Extension | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validated and ready for stable release |
-| Windows Desktop | `SelfRelay-Setup.exe` | In active development; installer will be published after native validation |
+| Extensión de Chrome | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validada |
+| SelfRelay para Windows | `SelfRelay-Setup.exe` | Candidata 0.2.1 en validación; se publicará como Release estable después de aprobación física |
 
-Open the repository's **Releases** page to download the product you want to test. A stable release may contain both assets; you only download the one you need.
+Un usuario de Windows solo necesita el instalador. No necesita Node.js, npm, Git, PowerShell, terminal, claves API ni herramientas de desarrollo.
 
-### Chrome installation
+### Windows
 
-1. Download `SelfRelay-Chrome.zip` from Releases.
-2. Extract the ZIP.
-3. Open `chrome://extensions`.
-4. Enable **Developer mode**.
-5. Choose **Load unpacked**.
-6. Select the extracted SelfRelay folder.
+1. Descargar `SelfRelay-Setup.exe` desde Releases cuando la versión haya sido aprobada.
+2. Ejecutar el instalador normalmente.
+3. Abrir SelfRelay desde Windows.
+4. Elegir explícitamente qué aplicaciones quiere seguir.
 
-No Node.js, npm, Git, terminal, API key, model download or build step is required.
+SelfRelay permanece disponible desde el área de notificación. Cerrar la ventana principal la oculta; la salida completa se realiza desde el menú de SelfRelay en el tray.
 
-### Windows installation
+### Chrome
 
-When the Windows build is published:
+1. Descargar `SelfRelay-Chrome.zip` desde Releases.
+2. Extraer el ZIP.
+3. Abrir `chrome://extensions`.
+4. Activar **Modo de desarrollador**.
+5. Elegir **Cargar descomprimida**.
+6. Seleccionar la carpeta extraída de SelfRelay.
 
-1. Download `SelfRelay-Setup.exe` from Releases.
-2. Double-click the installer.
-3. Install SelfRelay normally.
-4. Open SelfRelay.
+## Qué hace
 
-No development runtime or build tooling should be required by the evaluator.
+SelfRelay está diseñado para el momento en que una interrupción corta un trabajo y, al volver, hay que reconstruir mentalmente qué se estaba haciendo y cuál era el siguiente paso.
 
-See `docs/CODERCUP_DELIVERY.md` for the intended evaluator-facing delivery layout and `docs/DISTRIBUTION.md` for the packaging contract.
+En Windows el flujo central es:
 
-## Source layout
+1. el usuario elige una aplicación;
+2. SelfRelay observa únicamente esa aplicación y sus contextos relevantes;
+3. cuando ocurre una salida real del contexto —no una minimización ni un cambio de foco— se prepara un checkpoint;
+4. el usuario puede dejar texto y/o una nota de voz;
+5. al volver al mismo contexto, SelfRelay presenta los checkpoints que siguen pendientes, del más antiguo al más reciente;
+6. **Lo veo después** conserva el checkpoint sin resolverlo y **Ya retomé** resuelve únicamente el momento elegido.
 
-The folders below are implementation source, not end-user downloads:
+Los **Entornos** permiten agrupar varias aplicaciones que pertenecen al mismo trabajo. Un entorno continúa activo mientras al menos una de sus aplicaciones miembro siga activa.
 
-- `apps/extension` — Chrome Extension TypeScript source.
-- `apps/desktop` — Windows Desktop source once the Desktop milestone is merged into `main`.
-- `apps/web` — Optional web surface; intentionally deferred.
-- `packages/shared` — Shared Context/Checkpoint models and product semantics.
-- `docs` — Product behavior, distribution and validation documentation.
-- `artifacts/chrome-extension-unpacked` — Historical extension artifact only; not the current product build.
+## Privacidad y audio
 
-## Chrome product
+El diseño es local-first. SelfRelay no necesita una cuenta ni un backend para guardar checkpoints.
 
-The extension follows explicitly selected browser contexts by tab, exact page or site. When work is interrupted it captures a checkpoint; when the user returns it restores unresolved checkpoints relevant to that context.
+Las aplicaciones seleccionadas, checkpoints, historial, audio y transcripciones permanecen en el equipo. La grabación de voz se conserva localmente. La transcripción no se ejecuta automáticamente al grabar, guardar o abrir un checkpoint: solo se inicia cuando el usuario pulsa explícitamente **Transcribir audio**, utilizando el runtime local de Whisper incluido con la aplicación.
 
-Checkpoints support text and local audio. Audio lives locally in IndexedDB. Transcription is on-demand and local, using the packaged Whisper.cpp/WASM runtime rather than a remote API.
+## Arquitectura del repositorio
 
-The current validated Chrome product version is **0.4.3**.
+- `apps/extension` — extensión de Chrome. La versión 0.4.3 está congelada durante el trabajo Desktop.
+- `apps/desktop` — aplicación Windows, frontend y núcleo Tauri/Rust.
+- `apps/web` — superficie web opcional, actualmente diferida.
+- `packages/shared` — modelos y semántica compartida del producto.
+- `docs` — contratos de comportamiento, validación y distribución.
+- `.github/workflows` — CI y empaquetado reproducible.
 
-## Development
+El producto Windows final se compila como `SelfRelay.exe` con subsistema gráfico de Windows y se distribuye mediante un instalador NSIS versionado. Los workflows validan frontend, Rust, lifecycle, fixture Win32, estados runtime, branding, Whisper local, upgrade, single-instance, instalación y desinstalación antes de producir una candidata.
 
-These commands are for contributors and CI only, not product users:
+## Desarrollo
 
-```bash
-npm install
-npm run check
-```
+Los comandos de desarrollo son únicamente para contribuidores y CI. No forman parte de la instalación del usuario.
 
-`.github/workflows/package.yml` validates the extension, packages the local Whisper assets, runs browser QA, produces `SelfRelay-Chrome.zip`, and is configured so version tags can publish that package through GitHub Releases.
-
-Do not mix this project with unrelated repositories or products.
+La extensión y Desktop tienen pipelines independientes. Una build automatizada no se considera una versión pública aprobada hasta superar también la validación física correspondiente.
