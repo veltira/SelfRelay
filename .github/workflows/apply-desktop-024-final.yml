@@ -53,3 +53,5 @@ jobs:
           git add -A
           git commit -m "Finalize Desktop 0.2.4 history and in-process transcription"
           git push
+
+# Triggered intentionally after finalizer persistence repair.
