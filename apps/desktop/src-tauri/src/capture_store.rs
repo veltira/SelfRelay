@@ -122,7 +122,10 @@ pub fn all(connection: &Connection) -> rusqlite::Result<Vec<PendingCapture>> {
         "SELECT id, application_id, application_name, context_id, context_label, created_at_ms
          FROM pending_captures ORDER BY created_at_ms ASC, id ASC",
     )?;
-    statement.query_map([], map_capture)?.collect()
+    let rows = statement
+        .query_map([], map_capture)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 pub fn consume(connection: &Connection, id: &str) -> rusqlite::Result<bool> {
@@ -145,7 +148,6 @@ pub fn diagnostic(
         "INSERT INTO desktop_diagnostics(event, detail, created_at_ms) VALUES (?1, ?2, ?3)",
         params![event, detail, created_at_ms as i64],
     )?;
-    // Keep diagnostics bounded and local.
     connection.execute(
         "DELETE FROM desktop_diagnostics
          WHERE id NOT IN (SELECT id FROM desktop_diagnostics ORDER BY id DESC LIMIT 200)",
@@ -169,7 +171,7 @@ mod tests {
 
     #[test]
     fn durable_queue_consumes_exact_id_only() {
-        let mut connection = Connection::open_in_memory().unwrap();
+        let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
             "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL);",
         ).unwrap();
