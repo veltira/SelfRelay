@@ -1,5 +1,5 @@
 use crate::model::WindowRecord;
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::Sender;
 use std::{collections::HashMap, sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex}};
 
 #[cfg(windows)]
@@ -30,7 +30,7 @@ impl ObserverHandle {
         {
             let thread_id = self.hook_thread_id.load(Ordering::Acquire);
             if thread_id != 0 {
-                use windows::Win32::{Foundation::{LPARAM, WPARAM}, UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT}};
+                use ::windows::Win32::{Foundation::{LPARAM, WPARAM}, UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT}};
                 unsafe {
                     let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
                 }
@@ -60,7 +60,7 @@ pub fn start(
     _paused: Arc<AtomicBool>,
     _notify: ChangeNotifier,
 ) -> ObserverHandle {
-    let (command_tx, _command_rx) = unbounded();
+    let (command_tx, _command_rx) = crossbeam_channel::unbounded();
     ObserverHandle {
         command_tx,
         hook_thread_id: Arc::new(AtomicU32::new(0)),
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn observer_command_channel_is_single_owner_sensitive() {
-        let (tx, rx) = unbounded();
+        let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(ObserverCommand::Reconcile).unwrap();
         assert!(matches!(rx.recv().unwrap(), ObserverCommand::Reconcile));
     }
