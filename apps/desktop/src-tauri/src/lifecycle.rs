@@ -1,6 +1,6 @@
 use crate::model::WindowRecord;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 pub const EXIT_GRACE_MS: u64 = 650;
 
@@ -34,6 +34,7 @@ pub struct LifecycleDelta {
 struct PendingExit {
     snapshot: ContextSnapshot,
     due_at_ms: u64,
+    sequence: u64,
 }
 
 #[derive(Debug, Default)]
@@ -41,7 +42,7 @@ pub struct LifecycleState {
     initialized: bool,
     windows: HashMap<isize, ContextSnapshot>,
     pending_exits: HashMap<String, PendingExit>,
-    capture_queue: VecDeque<ContextSnapshot>,
+    next_exit_sequence: u64,
 }
 
 impl LifecycleState {
@@ -49,7 +50,6 @@ impl LifecycleState {
         self.initialized = false;
         self.windows.clear();
         self.pending_exits.clear();
-        self.capture_queue.clear();
     }
 
     pub fn synchronize(&mut self, records: &[WindowRecord], tracked: &HashSet<String>) {
@@ -84,8 +84,9 @@ impl LifecycleState {
             .map(|context| context.context_id.clone())
             .collect::<HashSet<_>>();
 
-        // A short destroy/recreate race is common in native apps. If the same
-        // durable context comes back before the grace deadline, it never left.
+        // Native apps can destroy/recreate their top-level HWND during normal use.
+        // If the same durable context returns inside the grace period, suppress both
+        // the exit and the corresponding return.
         let mut suppressed_returns = HashSet::new();
         for context_id in &next_contexts {
             if self.pending_exits.remove(context_id).is_some() {
@@ -96,33 +97,41 @@ impl LifecycleState {
         let mut seen_vanished = HashSet::new();
         for (hwnd, previous) in &self.windows {
             if let Some(current_same_window) = next.get(hwnd) {
-                // A document/title mutation inside the same top-level HWND is
-                // not a durable exit, even for specialized adapters.
+                // A title/document mutation on the same HWND is not a native exit.
                 if current_same_window.context_id != previous.context_id {
                     continue;
                 }
             } else if !next_contexts.contains(&previous.context_id)
                 && seen_vanished.insert(previous.context_id.clone())
             {
-                self.pending_exits
-                    .entry(previous.context_id.clone())
-                    .or_insert_with(|| PendingExit {
-                        snapshot: previous.clone(),
-                        due_at_ms: now_ms.saturating_add(EXIT_GRACE_MS),
-                    });
+                if !self.pending_exits.contains_key(&previous.context_id) {
+                    self.next_exit_sequence = self.next_exit_sequence.saturating_add(1);
+                    self.pending_exits.insert(
+                        previous.context_id.clone(),
+                        PendingExit {
+                            snapshot: previous.clone(),
+                            due_at_ms: now_ms.saturating_add(EXIT_GRACE_MS),
+                            sequence: self.next_exit_sequence,
+                        },
+                    );
+                }
             }
         }
 
-        let matured = self
+        let mut matured = self
             .pending_exits
             .iter()
             .filter(|(context_id, pending)| {
                 pending.due_at_ms <= now_ms && !next_contexts.contains(*context_id)
             })
-            .map(|(context_id, _)| context_id.clone())
+            .map(|(context_id, pending)| {
+                (context_id.clone(), pending.due_at_ms, pending.sequence)
+            })
             .collect::<Vec<_>>();
-        let mut captures = Vec::new();
-        for context_id in matured {
+        matured.sort_by_key(|(_, due_at_ms, sequence)| (*due_at_ms, *sequence));
+
+        let mut captures = Vec::with_capacity(matured.len());
+        for (context_id, _, _) in matured {
             if let Some(pending) = self.pending_exits.remove(&context_id) {
                 captures.push(pending.snapshot);
             }
@@ -143,28 +152,7 @@ impl LifecycleState {
         }
 
         self.windows = next;
-        for capture in &captures {
-            self.capture_queue.push_back(capture.clone());
-        }
         LifecycleDelta { captures, returns }
-    }
-
-    pub fn enqueue_manual_capture(&mut self, snapshot: ContextSnapshot) {
-        if !self.capture_queue.iter().any(|item| item.context_id == snapshot.context_id) {
-            self.capture_queue.push_back(snapshot);
-        }
-    }
-
-    pub fn pending_capture(&self) -> Option<ContextSnapshot> {
-        self.capture_queue.front().cloned()
-    }
-
-    pub fn consume_capture(&mut self) -> Option<ContextSnapshot> {
-        self.capture_queue.pop_front()
-    }
-
-    pub fn pending_capture_count(&self) -> usize {
-        self.capture_queue.len()
     }
 }
 
@@ -199,6 +187,8 @@ mod tests {
                 pid: hwnd as u32,
                 executable_path: Some(format!("C:/Windows/{app}.exe")),
                 executable_name: format!("{app}.exe"),
+                package_family_name: None,
+                app_user_model_id: None,
                 raw_title: label.into(),
                 visible: true,
                 is_top_level: true,
@@ -239,7 +229,6 @@ mod tests {
         let second = state.transition_at(&[], &selected, 5000);
         assert_eq!(first.captures.len(), 1);
         assert!(second.captures.is_empty());
-        assert_eq!(state.pending_capture_count(), 1);
     }
 
     #[test]
@@ -323,5 +312,44 @@ mod tests {
         state.transition_at(&[], &selected, 1000);
         let delta = state.transition_at(&[record(4, "notepad", "app:notepad.exe", "Notes")], &selected, 2000);
         assert_eq!(delta.returns.len(), 1);
+    }
+
+    #[test]
+    fn two_simultaneous_app_exits_preserve_exit_order() {
+        let mut state = LifecycleState::default();
+        let selected = tracked(&["app:notepad.exe", "app:paint.exe"]);
+        state.transition_at(
+            &[
+                record(1, "notepad", "app:notepad.exe", "Notepad"),
+                record(2, "paint", "app:paint.exe", "Paint"),
+            ],
+            &selected,
+            0,
+        );
+        state.transition_at(&[record(2, "paint", "app:paint.exe", "Paint")], &selected, 10);
+        state.transition_at(&[], &selected, 20);
+        let delta = state.transition_at(&[], &selected, 1000);
+        assert_eq!(delta.captures.len(), 2);
+        assert_eq!(delta.captures[0].application_id, "app:notepad.exe");
+        assert_eq!(delta.captures[1].application_id, "app:paint.exe");
+    }
+
+    #[test]
+    fn three_simultaneous_app_exits_are_all_emitted_once() {
+        let mut state = LifecycleState::default();
+        let selected = tracked(&["app:notepad.exe", "app:paint.exe", "app:word.exe"]);
+        state.transition_at(
+            &[
+                record(1, "notepad", "app:notepad.exe", "Notepad"),
+                record(2, "paint", "app:paint.exe", "Paint"),
+                record(3, "word", "app:word.exe", "Word"),
+            ],
+            &selected,
+            0,
+        );
+        state.transition_at(&[], &selected, 5);
+        let delta = state.transition_at(&[], &selected, 1000);
+        assert_eq!(delta.captures.len(), 3);
+        assert!(state.transition_at(&[], &selected, 2000).captures.is_empty());
     }
 }
