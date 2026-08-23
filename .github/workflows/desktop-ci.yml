@@ -95,7 +95,7 @@ jobs:
         env:
           SELFRELAY_FIXTURE_EXE: ${{ github.workspace }}\apps\desktop\src-tauri\target\debug\selfrelay-window-fixture.exe
           SELFRELAY_FIXTURE_REPORT: ${{ github.workspace }}\artifacts\desktop-native-qa\native-observer-result.txt
-        run: cargo test native_win32_fixture_sequence -- --ignored --exact --nocapture
+        run: cargo test native_win32_fixture_sequence -- --ignored --nocapture
       - name: Upload native Windows QA
         uses: actions/upload-artifact@v4
         with:
