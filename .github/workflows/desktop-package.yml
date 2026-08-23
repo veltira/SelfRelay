@@ -38,23 +38,89 @@ jobs:
       - name: Build NSIS release
         working-directory: apps/desktop
         run: npm run tauri:build
-      - name: Normalize installer name
+      - name: Verify Windows GUI subsystem
         shell: pwsh
         run: |
+          function Get-PESubsystem([string]$Path) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            if ($bytes.Length -lt 256) { throw "PE file is unexpectedly small: $Path" }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            if ($peOffset -lt 0 -or ($peOffset + 96) -ge $bytes.Length) { throw "Invalid PE header offset: $Path" }
+            if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+              throw "Missing PE signature: $Path"
+            }
+            $optionalHeader = $peOffset + 24
+            $magic = [BitConverter]::ToUInt16($bytes, $optionalHeader)
+            if ($magic -ne 0x10b -and $magic -ne 0x20b) { throw "Unsupported PE optional header: $Path" }
+            return [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
+          }
+
+          $appExe = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/selfrelay-desktop-core.exe"
+          if (-not (Test-Path $appExe)) { throw "Release executable not found: $appExe" }
+          $subsystem = Get-PESubsystem $appExe
+          Write-Host "SelfRelay application PE subsystem: $subsystem"
+          if ($subsystem -ne 2) {
+            throw "SelfRelay release executable must use IMAGE_SUBSYSTEM_WINDOWS_GUI (2), got $subsystem"
+          }
+          $signature = Get-AuthenticodeSignature $appExe
+          Write-Host "SelfRelay application Authenticode: $($signature.Status); signer=$($signature.SignerCertificate.Subject)"
+      - name: Normalize installer and emit package metadata
+        shell: pwsh
+        run: |
+          function Get-PESubsystem([string]$Path) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $optionalHeader = $peOffset + 24
+            return [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
+          }
+          function Signature-Label($Signature) {
+            if ($null -eq $Signature.SignerCertificate) { return "UNSIGNED" }
+            return "SIGNED"
+          }
+
+          $configPath = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/tauri.conf.json"
+          $version = (Get-Content $configPath -Raw | ConvertFrom-Json).version
+          if ($version -ne "0.1.1") { throw "Unexpected Desktop package version: $version" }
+
+          $appExe = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/selfrelay-desktop-core.exe"
           $nsis = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/bundle/nsis"
           if (-not (Test-Path $nsis)) { throw "NSIS output directory does not exist: $nsis" }
           $installer = Get-ChildItem -Path $nsis -Filter "*.exe" -File | Select-Object -First 1
           if (-not $installer) { throw "No NSIS .exe was produced" }
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE/dist" | Out-Null
-          Copy-Item $installer.FullName "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe" -Force
-          if (-not (Test-Path "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe")) {
-            throw "SelfRelay-Setup.exe was not created"
-          }
-          Get-Item "$env:GITHUB_WORKSPACE/dist/SelfRelay-Setup.exe" | Format-List Name,Length,FullName
+          if ($installer.Name -notmatch [regex]::Escape($version)) { throw "Installer filename does not contain expected version $version: $($installer.Name)" }
+
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $normalized = Join-Path $dist "SelfRelay-Setup.exe"
+          Copy-Item $installer.FullName $normalized -Force
+          if (-not (Test-Path $normalized)) { throw "SelfRelay-Setup.exe was not created" }
+
+          $appSubsystem = Get-PESubsystem $appExe
+          $installerSubsystem = Get-PESubsystem $normalized
+          $appSignature = Get-AuthenticodeSignature $appExe
+          $installerSignature = Get-AuthenticodeSignature $normalized
+          $installerHash = (Get-FileHash $normalized -Algorithm SHA256).Hash.ToLowerInvariant()
+          $installerSize = (Get-Item $normalized).Length
+
+          $metadata = @(
+            "VERSION=$version"
+            "APP_PE_SUBSYSTEM=$appSubsystem"
+            "APP_SIGNATURE=$(Signature-Label $appSignature)"
+            "APP_SIGNATURE_STATUS=$($appSignature.Status)"
+            "INSTALLER_PE_SUBSYSTEM=$installerSubsystem"
+            "INSTALLER_SIGNATURE=$(Signature-Label $installerSignature)"
+            "INSTALLER_SIGNATURE_STATUS=$($installerSignature.Status)"
+            "INSTALLER_SIZE=$installerSize"
+            "INSTALLER_SHA256=$installerHash"
+          )
+          $metadata | ForEach-Object { Write-Host $_ }
+          $metadata | Set-Content (Join-Path $dist "desktop-package-metadata.txt") -Encoding utf8
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: SelfRelay-Windows-Installer
-          path: dist/SelfRelay-Setup.exe
+          path: |
+            dist/SelfRelay-Setup.exe
+            dist/desktop-package-metadata.txt
           if-no-files-found: error
           retention-days: 14
