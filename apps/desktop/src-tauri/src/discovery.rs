@@ -122,6 +122,8 @@ pub fn friendly_name(executable_name: &str) -> String {
         "excel.exe" => "Microsoft Excel".into(),
         "powerpnt.exe" => "Microsoft PowerPoint".into(),
         "code.exe" => "Visual Studio Code".into(),
+        "chrome.exe" => "Google Chrome".into(),
+        "msedge.exe" => "Microsoft Edge".into(),
         "spotify.exe" => "Spotify".into(),
         "discord.exe" => "Discord".into(),
         name => name.trim_end_matches(".exe").replace(['_', '-'], " "),
@@ -151,7 +153,7 @@ fn eligible_executable(executable_name: &str) -> bool {
     let lower = executable_name.to_ascii_lowercase();
     if !lower.ends_with(".exe") || lower.trim() == ".exe" { return false; }
     if matches!(lower.as_str(),
-        "selfrelay.exe" | "selfrelay-desktop-core.exe" | "chrome.exe" | "msedge.exe" |
+        "selfrelay.exe" | "selfrelay-desktop-core.exe" |
         "explorer.exe" | "dwm.exe" | "taskhostw.exe" | "sihost.exe" |
         "startmenuexperiencehost.exe" | "searchhost.exe" | "applicationframehost.exe")
     {
@@ -427,11 +429,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filters_helpers_and_selfrelay() {
+    fn filters_helpers_and_selfrelay_but_keeps_browsers() {
         assert!(!eligible_executable("SelfRelay.exe"));
         assert!(!eligible_executable("AcmeUpdater.exe"));
         assert!(!eligible_executable("service-helper.exe"));
         assert!(eligible_executable("notepad.exe"));
+        assert!(eligible_executable("chrome.exe"));
+        assert!(eligible_executable("msedge.exe"));
+        assert_eq!(friendly_name("chrome.exe"), "Google Chrome");
+        assert_eq!(friendly_name("msedge.exe"), "Microsoft Edge");
     }
 
     #[test]

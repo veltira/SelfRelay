@@ -7,7 +7,6 @@ pub enum IgnoreReason {
     UtilityWindow,
     MissingIdentity,
     SelfRelay,
-    Browser,
 }
 
 pub fn classify_window(metadata: &WindowMetadata) -> Result<(), IgnoreReason> {
@@ -30,9 +29,6 @@ pub fn classify_window(metadata: &WindowMetadata) -> Result<(), IgnoreReason> {
     }
     if exe == "selfrelay.exe" || exe == "selfrelay-desktop-core.exe" {
         return Err(IgnoreReason::SelfRelay);
-    }
-    if exe == "chrome.exe" || exe == "msedge.exe" {
-        return Err(IgnoreReason::Browser);
     }
 
     Ok(())
@@ -84,9 +80,9 @@ mod tests {
     }
 
     #[test]
-    fn excludes_browsers() {
-        assert_eq!(classify_window(&sample("chrome.exe")), Err(IgnoreReason::Browser));
-        assert_eq!(classify_window(&sample("msedge.exe")), Err(IgnoreReason::Browser));
+    fn accepts_browser_windows_as_application_contexts() {
+        assert_eq!(classify_window(&sample("chrome.exe")), Ok(()));
+        assert_eq!(classify_window(&sample("msedge.exe")), Ok(()));
     }
 
     #[test]

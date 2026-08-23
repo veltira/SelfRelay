@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::atomic::{AtomicU64, Ordering}};
 
 static CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const DEDUPE_WINDOW_MS: u64 = 4_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +58,27 @@ pub fn enqueue(
     snapshot: &ContextSnapshot,
     created_at_ms: u64,
 ) -> rusqlite::Result<PendingCapture> {
+    // Lifecycle already suppresses normal destroy/recreate races. This durable
+    // guard is intentionally independent: if Windows emits a second equivalent
+    // exit through another HWND/event path, do not make the user dismiss the
+    // same capture twice. A real later interruption is preserved once the first
+    // pending row is consumed, or once this short race window has elapsed.
+    let lower_bound = created_at_ms.saturating_sub(DEDUPE_WINDOW_MS) as i64;
+    if let Some(existing) = connection
+        .query_row(
+            "SELECT id, application_id, application_name, context_id, context_label, created_at_ms
+             FROM pending_captures
+             WHERE application_id = ?1 AND context_id = ?2 AND created_at_ms >= ?3
+             ORDER BY created_at_ms DESC, id DESC
+             LIMIT 1",
+            params![snapshot.application_id, snapshot.context_id, lower_bound],
+            map_capture,
+        )
+        .optional()?
+    {
+        return Ok(existing);
+    }
+
     let sequence = CAPTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let capture = PendingCapture {
         id: format!("capture:{created_at_ms}:{sequence}"),
@@ -169,24 +191,45 @@ mod tests {
         }
     }
 
-    #[test]
-    fn durable_queue_consumes_exact_id_only() {
+    fn initialized_connection() -> Connection {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(
-            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL);",
-        ).unwrap();
-        connection.execute_batch(
-            "CREATE TABLE pending_captures (
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL);
+             CREATE TABLE pending_captures (
                 id TEXT PRIMARY KEY, application_id TEXT NOT NULL, application_name TEXT NOT NULL,
                 context_id TEXT NOT NULL, context_label TEXT NOT NULL, created_at_ms INTEGER NOT NULL
              );
              CREATE INDEX idx_pending_captures_order ON pending_captures(created_at_ms, id);",
         ).unwrap();
+        connection
+    }
+
+    #[test]
+    fn durable_queue_consumes_exact_id_only() {
+        let connection = initialized_connection();
         let a = enqueue(&connection, &snapshot("notepad", "a"), 10).unwrap();
         let b = enqueue(&connection, &snapshot("paint", "b"), 11).unwrap();
         assert_eq!(oldest(&connection).unwrap().unwrap().id, a.id);
         assert!(consume(&connection, &b.id).unwrap());
         assert_eq!(oldest(&connection).unwrap().unwrap().id, a.id);
         assert_eq!(count(&connection).unwrap(), 1);
+    }
+
+    #[test]
+    fn rapid_duplicate_exit_reuses_existing_pending_capture() {
+        let connection = initialized_connection();
+        let first = enqueue(&connection, &snapshot("notepad", "note"), 10_000).unwrap();
+        let duplicate = enqueue(&connection, &snapshot("notepad", "note"), 10_300).unwrap();
+        assert_eq!(duplicate.id, first.id);
+        assert_eq!(count(&connection).unwrap(), 1);
+    }
+
+    #[test]
+    fn later_real_exit_is_preserved_after_dedupe_window() {
+        let connection = initialized_connection();
+        let first = enqueue(&connection, &snapshot("notepad", "note"), 10_000).unwrap();
+        let later = enqueue(&connection, &snapshot("notepad", "note"), 15_000).unwrap();
+        assert_ne!(later.id, first.id);
+        assert_eq!(count(&connection).unwrap(), 2);
     }
 }
