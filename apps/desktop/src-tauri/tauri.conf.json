@@ -14,6 +14,7 @@
       {
         "label": "main",
         "title": "SelfRelay",
+        "url": "index.html",
         "width": 780,
         "height": 620,
         "minWidth": 680,
@@ -22,6 +23,36 @@
         "resizable": true,
         "fullscreen": false,
         "visible": true
+      },
+      {
+        "label": "capture",
+        "title": "SelfRelay — Guardar checkpoint",
+        "url": "index.html?surface=capture",
+        "width": 470,
+        "height": 510,
+        "minWidth": 430,
+        "minHeight": 430,
+        "center": true,
+        "resizable": false,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "recovery",
+        "title": "SelfRelay — Retomar",
+        "url": "index.html?surface=recovery",
+        "width": 480,
+        "height": 520,
+        "minWidth": 440,
+        "minHeight": 440,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {
