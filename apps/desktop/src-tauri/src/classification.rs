@@ -19,7 +19,7 @@ pub fn classify_window(metadata: &WindowMetadata) -> Result<(), IgnoreReason> {
     }
 
     let class_name = metadata.class_name.to_lowercase();
-    if matches!(class_name.as_str(), "#32768" | "tooltips_class32" | "menu") {
+    if matches!(class_name.as_str(), "#32768" | "#32770" | "tooltips_class32" | "menu") {
         return Err(IgnoreReason::UtilityWindow);
     }
 
@@ -69,6 +69,16 @@ mod tests {
         let mut metadata = sample("Code.exe");
         metadata.visible = false;
         assert_eq!(classify_window(&metadata), Err(IgnoreReason::NotVisible));
+    }
+
+    #[test]
+    fn excludes_standard_dialogs_and_tooltips() {
+        let mut dialog = sample("WINWORD.EXE");
+        dialog.class_name = "#32770".into();
+        assert_eq!(classify_window(&dialog), Err(IgnoreReason::UtilityWindow));
+        let mut tooltip = sample("notepad.exe");
+        tooltip.class_name = "tooltips_class32".into();
+        assert_eq!(classify_window(&tooltip), Err(IgnoreReason::UtilityWindow));
     }
 
     #[test]
