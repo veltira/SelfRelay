@@ -1,16 +1,19 @@
 name: Desktop CI
 
 on:
-  push:
+  pull_request:
     branches: [main]
     paths:
-      - ".github/workflows/desktop-ci.yml"
+      - "apps/desktop/**"
+      - "scripts/finalize_desktop_024.py"
+      - ".github/workflows/**"
 
 permissions:
   contents: write
 
 jobs:
   finalize-024:
+    if: github.head_ref == 'final/desktop-0.2.4'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -22,9 +25,21 @@ jobs:
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+      - id: source_state
+        name: Detect finalized source
+        shell: pwsh
+        run: |
+          $cargo = Get-Content apps/desktop/src-tauri/Cargo.toml -Raw
+          if ($cargo -match 'version = "0\.2\.4"') {
+            "finalized=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "finalized=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
       - name: Apply deterministic Desktop 0.2.4 patch
+        if: steps.source_state.outputs.finalized != 'true'
         run: python scripts/finalize_desktop_024.py
       - name: Refresh npm lock metadata
+        if: steps.source_state.outputs.finalized != 'true'
         working-directory: apps/desktop
         run: npm install --package-lock-only --workspaces=false --no-audit --no-fund
       - name: Prepare model-only CI resource
@@ -39,16 +54,12 @@ jobs:
       - name: Typecheck frontend
         working-directory: apps/desktop
         run: npm run typecheck
-      - name: Remove branch one-shot machinery
-        shell: pwsh
-        run: |
-          Remove-Item scripts/finalize_desktop_024.py -Force
-          Remove-Item .github/workflows/apply-desktop-024-final.yml -Force
       - name: Commit validated 0.2.4 source
+        if: steps.source_state.outputs.finalized != 'true'
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add apps/desktop .github/workflows/desktop-package.yml
           git commit -m "Finalize Desktop 0.2.4 history and in-process transcription"
           git push origin HEAD:final/desktop-0.2.4
