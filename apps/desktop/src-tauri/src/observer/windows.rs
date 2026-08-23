@@ -26,10 +26,10 @@ use ::windows::{core::{BOOL, PWSTR}, Win32::{
 }};
 
 // Polling keeps SelfRelay passive: it never installs a global accessibility hook
-// into the Windows event stream. 150 ms is fast enough for a responsive checkpoint
-// while leaving lifecycle.rs responsible for deciding whether a disappearance is
-// a real exit or a short HWND recreation.
-const POLL_INTERVAL_MS: u64 = 150;
+// into the Windows event stream. 100 ms keeps checkpoint latency low while
+// lifecycle.rs still decides whether a disappearance is a real exit or a short
+// HWND recreation.
+const POLL_INTERVAL_MS: u64 = 100;
 const SETTLE_TICKS_AFTER_CHANGE: u8 = 4;
 
 pub(super) fn start(
@@ -225,8 +225,9 @@ unsafe fn process_details(pid: u32) -> (Option<String>, Option<String>, Option<S
     .ok()
     .map(|_| String::from_utf16_lossy(&path_buffer[..path_size as usize]));
 
-    // Browsers are intentionally outside Desktop tracking (the Chrome extension
-    // owns that surface). Avoid additional package/AUMID queries against them.
+    // Chrome and Edge are supported as app-level contexts. Keep their observation
+    // deliberately minimal: the executable path is enough for a stable identity,
+    // so avoid extra package/AUMID queries against browser processes.
     let executable_name = path
         .as_deref()
         .and_then(|value| Path::new(value).file_name())
