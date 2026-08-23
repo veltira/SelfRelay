@@ -148,7 +148,13 @@ fn apply_event(registry: &WindowRegistry, event: RawWinEvent) -> bool {
         return false;
     }
 
-    if event.event == EVENT_OBJECT_DESTROY || event.event == EVENT_OBJECT_HIDE {
+    // A hide/minimize is not a real context exit. Only destruction removes the
+    // top-level window from the registry for checkpoint lifecycle purposes.
+    if event.event == EVENT_OBJECT_HIDE {
+        return false;
+    }
+
+    if event.event == EVENT_OBJECT_DESTROY {
         return registry.lock().map(|mut map| map.remove(&event.hwnd).is_some()).unwrap_or(false);
     }
 
