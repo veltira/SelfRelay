@@ -13,7 +13,7 @@ La distribución para usuarios se realiza mediante **GitHub Releases** y cada pl
 | Producto | Archivo de distribución | Estado |
 | --- | --- | --- |
 | Extensión de Chrome | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validada |
-| SelfRelay para Windows | `SelfRelay-Setup.exe` | Candidata 0.2.1 en validación; se publicará como Release estable después de aprobación física |
+| SelfRelay para Windows | `SelfRelay-Setup.exe` | Candidata 0.2.2 en validación; se publicará como Release estable después de aprobación física |
 
 Un usuario de Windows solo necesita el instalador. No necesita Node.js, npm, Git, PowerShell, terminal, claves API ni herramientas de desarrollo.
 
@@ -43,12 +43,15 @@ En Windows el flujo central es:
 
 1. el usuario elige una aplicación;
 2. SelfRelay observa únicamente esa aplicación y sus contextos relevantes;
-3. cuando ocurre una salida real del contexto —no una minimización ni un cambio de foco— se prepara un checkpoint;
-4. el usuario puede dejar texto y/o una nota de voz;
-5. al volver al mismo contexto, SelfRelay presenta los checkpoints que siguen pendientes, del más antiguo al más reciente;
-6. **Lo veo después** conserva el checkpoint sin resolverlo y **Ya retomé** resuelve únicamente el momento elegido.
+3. cuando ocurre una salida real del contexto —no una minimización ni un cambio de foco— se prepara un checkpoint durable;
+4. la ventana de captura permanece oculta hasta que su WebView real obtiene el ID exacto, React termina de renderizarlo y reporta readiness al backend;
+5. el usuario puede dejar texto y/o una nota de voz;
+6. al volver al mismo contexto, SelfRelay presenta los checkpoints que siguen pendientes, del más antiguo al más reciente, después del mismo handshake de readiness;
+7. **Lo veo después** conserva el checkpoint sin resolverlo y **Ya retomé** resuelve únicamente el momento elegido.
 
 Los **Entornos** permiten agrupar varias aplicaciones que pertenecen al mismo trabajo. Un entorno continúa activo mientras al menos una de sus aplicaciones miembro siga activa.
+
+La selección de aplicaciones muestra únicamente candidatas user-facing después de filtrar hosts internos de Windows, nombres de recursos sin resolver y duplicados entre ventanas activas, App Paths, Start Menu, Uninstall y AppsFolder.
 
 ## Privacidad y audio
 
@@ -65,7 +68,7 @@ Las aplicaciones seleccionadas, checkpoints, historial, audio y transcripciones 
 - `docs` — contratos de comportamiento, validación y distribución.
 - `.github/workflows` — CI y empaquetado reproducible.
 
-El producto Windows final se compila como `SelfRelay.exe` con subsistema gráfico de Windows y se distribuye mediante un instalador NSIS versionado. Los workflows validan frontend, Rust, lifecycle, fixture Win32, estados runtime, branding, Whisper local, upgrade, single-instance, instalación y desinstalación antes de producir una candidata.
+El producto Windows final se compila como `SelfRelay.exe` con subsistema gráfico de Windows y se distribuye mediante un instalador NSIS versionado. Los workflows validan frontend, Rust, lifecycle, fixture Win32, estados runtime, WebViews reales instaladas, calidad de discovery, branding, Whisper local, upgrade, single-instance, instalación y desinstalación antes de producir una candidata.
 
 ## Desarrollo
 
