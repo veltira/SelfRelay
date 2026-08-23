@@ -68,7 +68,7 @@ export interface CheckpointRecord {
 }
 
 export interface RecoveryView {
-  targetKind: "context" | "workset";
+  targetKind: "context" | "workset" | "checkpoint";
   targetName: string;
   applicationId: string;
   applicationName: string;
@@ -89,6 +89,7 @@ export interface WorksetView {
 export interface SettingsView {
   launchAtStartup: boolean;
   trackingActive: boolean;
+  archiveResolvedCheckpoints: boolean;
   version: string;
   dataDirectory: string;
 }
