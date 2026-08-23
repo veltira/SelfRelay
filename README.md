@@ -6,6 +6,8 @@ SelfRelay ayuda a retomar una tarea interrumpida sin perder el contexto mental d
 
 Proyecto presentado a **CoderCup AI 2026**.
 
+> **Enlace único del proyecto para CoderCup:** esta misma página (`https://github.com/veltira/SelfRelay`). Desde aquí el jurado puede entender el proyecto, descargar la aplicación de Windows o la extensión de Chrome y consultar las instrucciones de prueba. No hace falta entregar un enlace distinto por plataforma.
+
 ## Descargar y probar SelfRelay
 
 SelfRelay puede probarse de dos formas. Ambas pertenecen al mismo proyecto y utilizan la misma idea central de checkpoints de contexto.
