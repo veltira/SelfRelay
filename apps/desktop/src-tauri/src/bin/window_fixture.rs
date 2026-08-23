@@ -7,12 +7,13 @@ mod windows_fixture {
         core::PCWSTR,
         Win32::{
             Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+            Graphics::Gdi::UpdateWindow,
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, GetMessageW, PostQuitMessage,
-                RegisterClassW, SetWindowTextW, ShowWindow, UpdateWindow, CW_USEDEFAULT, MSG,
-                SW_MINIMIZE, SW_RESTORE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW, WM_CLOSE,
-                WM_DESTROY, WS_OVERLAPPEDWINDOW,
+                RegisterClassW, SetWindowTextW, ShowWindow, CW_USEDEFAULT, MSG, SW_MINIMIZE,
+                SW_RESTORE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW, WM_CLOSE, WM_DESTROY,
+                WS_OVERLAPPEDWINDOW,
             },
         },
     };
