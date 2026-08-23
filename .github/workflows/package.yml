@@ -123,7 +123,7 @@ jobs:
           retention-days: 30
 
   publish-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: package-chrome
     runs-on: ubuntu-latest
     permissions:
@@ -139,8 +139,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release/SelfRelay-Chrome.zip --clobber
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"
+            RELEASE_TITLE="SelfRelay $GITHUB_REF_NAME"
           else
-            gh release create "$GITHUB_REF_NAME" release/SelfRelay-Chrome.zip --verify-tag --generate-notes --title "SelfRelay $GITHUB_REF_NAME"
+            RELEASE_TAG="codercup-2026"
+            RELEASE_TITLE="SelfRelay — CoderCup 2026"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/SelfRelay-Chrome.zip --clobber
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            gh release create "$RELEASE_TAG" release/SelfRelay-Chrome.zip --verify-tag --generate-notes --title "$RELEASE_TITLE"
+          else
+            gh release create "$RELEASE_TAG" release/SelfRelay-Chrome.zip --target "$GITHUB_SHA" --generate-notes --title "$RELEASE_TITLE"
           fi
