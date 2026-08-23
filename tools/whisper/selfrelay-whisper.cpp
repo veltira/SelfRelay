@@ -1,5 +1,6 @@
 #include "whisper.h"
 #include <emscripten/bind.h>
+#include <emscripten/console.h>
 #include <emscripten/val.h>
 #include <algorithm>
 #include <stdexcept>
@@ -8,8 +9,43 @@
 
 namespace {
 whisper_context * g_ctx = nullptr;
+thread_local ggml_log_level g_last_log_level = GGML_LOG_LEVEL_INFO;
+
+void selfrelay_whisper_log(ggml_log_level level, const char * text, void *) {
+    if (!text || !*text) return;
+
+    if (level == GGML_LOG_LEVEL_CONT) {
+        level = g_last_log_level;
+    } else if (level != GGML_LOG_LEVEL_NONE) {
+        g_last_log_level = level;
+    }
+
+    switch (level) {
+        case GGML_LOG_LEVEL_ERROR:
+            emscripten_console_error(text);
+            break;
+        case GGML_LOG_LEVEL_WARN:
+            emscripten_console_warn(text);
+            break;
+        case GGML_LOG_LEVEL_DEBUG:
+        case GGML_LOG_LEVEL_INFO:
+        case GGML_LOG_LEVEL_NONE:
+        case GGML_LOG_LEVEL_CONT:
+        default:
+            emscripten_console_log(text);
+            break;
+    }
+}
+
+void configure_whisper_logging() {
+    static bool configured = false;
+    if (configured) return;
+    whisper_log_set(selfrelay_whisper_log, nullptr);
+    configured = true;
+}
 
 bool init_model(const std::string & path) {
+    configure_whisper_logging();
     if (g_ctx) {
         whisper_free(g_ctx);
         g_ctx = nullptr;
