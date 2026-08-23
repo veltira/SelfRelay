@@ -57,7 +57,7 @@ jobs:
       - name: Frontend unit tests
         working-directory: apps/desktop
         run: npm test
-      - name: Build frontend for visual QA
+      - name: Build frontend for mock visual QA
         working-directory: apps/desktop
         run: npm run build
       - name: Install visual QA browser
@@ -66,13 +66,13 @@ jobs:
         run: |
           npm install --no-save --no-package-lock playwright@1.55.0
           npx playwright install chromium
-      - name: Desktop visual state QA
+      - name: Desktop mock visual QA
         working-directory: apps/desktop
         run: npm run visual:qa
-      - name: Upload Desktop visual QA
+      - name: Upload Desktop mock visual QA
         uses: actions/upload-artifact@v4
         with:
-          name: SelfRelay-Desktop-Visual-QA
+          name: SelfRelay-Desktop-Mock-Visual-QA
           path: artifacts/desktop-visual-qa
           if-no-files-found: error
           retention-days: 14
@@ -86,10 +86,24 @@ jobs:
       - name: Rust unit tests
         working-directory: apps/desktop/src-tauri
         run: cargo test
+      - name: Runtime capture and multi-app state matrix
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        env:
+          SELFRELAY_RUNTIME_REPORT: ${{ github.workspace }}\artifacts\desktop-runtime-state-qa\runtime-state.txt
+        run: cargo test runtime_capture_handoff_and_multi_app_matrix -- --nocapture
+      - name: Upload runtime state QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Runtime-State-QA
+          path: artifacts/desktop-runtime-state-qa
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Build native Win32 observer fixture
         working-directory: apps/desktop/src-tauri
         run: cargo build --bin selfrelay-window-fixture
-      - name: Run real Win32 observer fixture
+      - name: Run real Win32 observer + capture integration fixture
         working-directory: apps/desktop/src-tauri
         shell: pwsh
         env:
