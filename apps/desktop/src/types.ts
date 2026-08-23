@@ -75,6 +75,7 @@ export interface RecoveryView {
   contextId: string;
   contextLabel: string;
   worksetId?: string | null;
+  readyToken?: string;
   checkpoints: CheckpointRecord[];
 }
 
