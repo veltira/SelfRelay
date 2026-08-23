@@ -2,231 +2,132 @@ use super::{ChangeNotifier, ObserverCommand, ObserverHandle, WindowRegistry};
 use crate::{
     adapters::derive_context,
     classification::classify_window,
-    lifecycle::EXIT_GRACE_MS,
     model::{WindowMetadata, WindowRecord},
 };
-use crossbeam_channel::{bounded, select, unbounded, Sender};
+use crossbeam_channel::{select, tick, unbounded};
 use std::{
-    ffi::c_void,
+    collections::HashMap,
     path::Path,
-    sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use ::windows::{core::{BOOL, PWSTR}, Win32::{
     Foundation::{CloseHandle, HWND, LPARAM, ERROR_INSUFFICIENT_BUFFER},
     Storage::Packaging::Appx::{GetApplicationUserModelId, GetPackageFamilyName},
-    System::Threading::{GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
-    UI::{
-        Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
-        WindowsAndMessaging::{
-            EnumWindows, GetAncestor, GetClassNameW, GetForegroundWindow, GetMessageW,
-            GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GA_ROOT, MSG,
-            EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
-            EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND,
-            WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
-        },
+    System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
+    UI::WindowsAndMessaging::{
+        EnumWindows, GetAncestor, GetClassNameW, GetForegroundWindow,
+        GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GA_ROOT,
     },
 }};
 
-#[derive(Debug, Clone, Copy)]
-struct RawWinEvent {
-    event: u32,
-    hwnd: isize,
-    id_object: i32,
-    id_child: i32,
-}
-
-static HOOK_SENDER: OnceLock<Mutex<Option<Sender<RawWinEvent>>>> = OnceLock::new();
-
-unsafe extern "system" fn win_event_callback(
-    _hook: HWINEVENTHOOK,
-    event: u32,
-    hwnd: HWND,
-    id_object: i32,
-    id_child: i32,
-    _event_thread: u32,
-    _event_time: u32,
-) {
-    let Some(cell) = HOOK_SENDER.get() else { return; };
-    let Ok(guard) = cell.lock() else { return; };
-    let Some(sender) = guard.as_ref() else { return; };
-    let _ = sender.try_send(RawWinEvent {
-        event,
-        hwnd: hwnd.0 as isize,
-        id_object,
-        id_child,
-    });
-}
+// Polling keeps SelfRelay passive: it never installs a global accessibility hook
+// into the Windows event stream. 150 ms is fast enough for a responsive checkpoint
+// while leaving lifecycle.rs responsible for deciding whether a disappearance is
+// a real exit or a short HWND recreation.
+const POLL_INTERVAL_MS: u64 = 150;
+const SETTLE_TICKS_AFTER_CHANGE: u8 = 4;
 
 pub(super) fn start(
     registry: WindowRegistry,
     paused: Arc<AtomicBool>,
     notify: ChangeNotifier,
 ) -> ObserverHandle {
-    let (event_tx, event_rx) = bounded::<RawWinEvent>(512);
-    let sender_cell = HOOK_SENDER.get_or_init(|| Mutex::new(None));
-    if let Ok(mut sender) = sender_cell.lock() {
-        *sender = Some(event_tx);
-    }
-
     reconcile_registry(&registry);
     notify();
 
     let (command_tx, command_rx) = unbounded::<ObserverCommand>();
+    // ObserverHandle still carries this field for compatibility with the previous
+    // WinEvent implementation. Zero means there is no hook/message-loop thread.
     let hook_thread_id = Arc::new(AtomicU32::new(0));
 
     let engine_registry = Arc::clone(&registry);
     let engine_paused = Arc::clone(&paused);
     let engine_notify = Arc::clone(&notify);
     thread::Builder::new()
-        .name("selfrelay-window-engine".into())
-        .spawn(move || loop {
-            select! {
-                recv(command_rx) -> command => match command {
-                    Ok(ObserverCommand::Reconcile) => {
-                        if !engine_paused.load(Ordering::Acquire) {
-                            reconcile_registry(&engine_registry);
-                            engine_notify();
-                        }
-                    }
-                    Ok(ObserverCommand::Shutdown) | Err(_) => break,
-                },
-                recv(event_rx) -> event => match event {
-                    Ok(event) => {
-                        if !engine_paused.load(Ordering::Acquire)
-                            && apply_event(&engine_registry, event)
-                        {
-                            engine_notify();
-                            if event.event == EVENT_OBJECT_DESTROY {
-                                // Mature a native exit after the recreation grace without doing a
-                                // global EnumWindows reconcile, which could misclassify minimized apps.
-                                let delayed_notify = Arc::clone(&engine_notify);
-                                thread::spawn(move || {
-                                    thread::sleep(Duration::from_millis(EXIT_GRACE_MS + 75));
-                                    delayed_notify();
-                                });
+        .name("selfrelay-window-observer".into())
+        .spawn(move || {
+            let ticker = tick(Duration::from_millis(POLL_INTERVAL_MS));
+            let mut settle_ticks = 0u8;
+            loop {
+                select! {
+                    recv(command_rx) -> command => match command {
+                        Ok(ObserverCommand::Reconcile) => {
+                            if !engine_paused.load(Ordering::Acquire) {
+                                let _ = reconcile_registry(&engine_registry);
+                                settle_ticks = SETTLE_TICKS_AFTER_CHANGE;
+                                engine_notify();
                             }
                         }
+                        Ok(ObserverCommand::Shutdown) | Err(_) => break,
+                    },
+                    recv(ticker) -> _ => {
+                        if engine_paused.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        let changed = reconcile_registry(&engine_registry);
+                        if changed {
+                            settle_ticks = SETTLE_TICKS_AFTER_CHANGE;
+                            engine_notify();
+                        } else if settle_ticks > 0 {
+                            // Lifecycle may have a pending exit whose grace period has
+                            // matured even though the visible window set no longer changes.
+                            settle_ticks -= 1;
+                            engine_notify();
+                        }
                     }
-                    Err(_) => break,
                 }
             }
         })
-        .expect("failed to start SelfRelay lifecycle engine");
-
-    let hook_id_target = Arc::clone(&hook_thread_id);
-    thread::Builder::new()
-        .name("selfrelay-winevent-hook".into())
-        .spawn(move || unsafe {
-            hook_id_target.store(GetCurrentThreadId(), Ordering::Release);
-            run_hook_message_loop();
-        })
-        .expect("failed to start SelfRelay WinEvent hook thread");
+        .expect("failed to start SelfRelay polling observer");
 
     ObserverHandle { command_tx, hook_thread_id }
 }
 
-unsafe fn run_hook_message_loop() {
-    let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
-    let hooks = [
-        SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, None, Some(win_event_callback), 0, 0, flags),
-        SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, None, Some(win_event_callback), 0, 0, flags),
-        SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, None, Some(win_event_callback), 0, 0, flags),
-        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(win_event_callback), 0, 0, flags),
-    ];
-
-    let mut message = MSG::default();
-    while GetMessageW(&mut message, None, 0, 0).as_bool() {}
-
-    for hook in hooks {
-        if !hook.is_invalid() {
-            let _ = UnhookWinEvent(hook);
+fn reconcile_registry(registry: &WindowRegistry) -> bool {
+    let mut next = HashMap::<isize, WindowRecord>::new();
+    for metadata in snapshot_windows() {
+        if classify_window(&metadata).is_ok() {
+            let context = derive_context(&metadata);
+            next.insert(metadata.hwnd, WindowRecord { metadata, context });
         }
     }
+
+    let Ok(mut current) = registry.lock() else { return false; };
+    let changed = !registry_equivalent(&current, &next);
+    if changed {
+        *current = next;
+    }
+    changed
 }
 
-fn apply_event(registry: &WindowRegistry, event: RawWinEvent) -> bool {
-    if event.hwnd == 0 {
-        return false;
-    }
-
-    if event.event == EVENT_SYSTEM_FOREGROUND {
-        let mut changed = false;
-        if let Ok(mut map) = registry.lock() {
-            for record in map.values_mut() {
-                let is_foreground = record.metadata.hwnd == event.hwnd;
-                if record.metadata.foreground != is_foreground {
-                    record.metadata.foreground = is_foreground;
-                    changed = true;
-                }
-            }
-        }
-        return upsert_window(registry, event.hwnd) || changed;
-    }
-
-    if event.id_object != 0 || event.id_child != 0 {
-        return false;
-    }
-
-    if event.event == EVENT_OBJECT_HIDE {
-        return false;
-    }
-
-    if event.event == EVENT_OBJECT_DESTROY {
-        return registry
-            .lock()
-            .map(|mut map| map.remove(&event.hwnd).is_some())
-            .unwrap_or(false);
-    }
-
-    if event.event == EVENT_OBJECT_CREATE
-        || event.event == EVENT_OBJECT_SHOW
-        || event.event == EVENT_OBJECT_NAMECHANGE
-    {
-        return upsert_window(registry, event.hwnd);
-    }
-
-    false
-}
-
-fn reconcile_registry(registry: &WindowRegistry) {
-    let snapshot = snapshot_windows();
-    if let Ok(mut map) = registry.lock() {
-        map.clear();
-        for metadata in snapshot {
-            if classify_window(&metadata).is_ok() {
-                let context = derive_context(&metadata);
-                map.insert(metadata.hwnd, WindowRecord { metadata, context });
-            }
-        }
-    }
-}
-
-fn upsert_window(registry: &WindowRegistry, hwnd_value: isize) -> bool {
-    let hwnd = HWND(hwnd_value as *mut c_void);
-    let Some(metadata) = (unsafe { inspect_window(hwnd) }) else {
-        return registry
-            .lock()
-            .map(|mut map| map.remove(&hwnd_value).is_some())
-            .unwrap_or(false);
-    };
-    if classify_window(&metadata).is_err() {
-        return registry
-            .lock()
-            .map(|mut map| map.remove(&hwnd_value).is_some())
-            .unwrap_or(false);
-    }
-    let context = derive_context(&metadata);
-    let record = WindowRecord { metadata, context };
-    registry
-        .lock()
-        .map(|mut map| {
-            let changed = map.get(&hwnd_value) != Some(&record);
-            map.insert(hwnd_value, record);
-            changed
+fn registry_equivalent(
+    current: &HashMap<isize, WindowRecord>,
+    next: &HashMap<isize, WindowRecord>,
+) -> bool {
+    current.len() == next.len()
+        && current.iter().all(|(hwnd, left)| {
+            next.get(hwnd).map(|right| record_equivalent(left, right)).unwrap_or(false)
         })
-        .unwrap_or(false)
+}
+
+fn record_equivalent(left: &WindowRecord, right: &WindowRecord) -> bool {
+    left.context == right.context
+        && left.metadata.hwnd == right.metadata.hwnd
+        && left.metadata.pid == right.metadata.pid
+        && left.metadata.executable_path == right.metadata.executable_path
+        && left.metadata.executable_name == right.metadata.executable_name
+        && left.metadata.package_family_name == right.metadata.package_family_name
+        && left.metadata.app_user_model_id == right.metadata.app_user_model_id
+        && left.metadata.raw_title == right.metadata.raw_title
+        && left.metadata.visible == right.metadata.visible
+        && left.metadata.is_top_level == right.metadata.is_top_level
+        && left.metadata.class_name == right.metadata.class_name
+        && left.metadata.foreground == right.metadata.foreground
 }
 
 pub(crate) fn snapshot_windows() -> Vec<WindowMetadata> {
@@ -252,17 +153,24 @@ unsafe fn inspect_window(hwnd: HWND) -> Option<WindowMetadata> {
         return None;
     }
 
+    // Reject non-user-facing windows before opening any process handle. Besides
+    // reducing work, this minimizes interaction with unrelated applications.
     let visible = IsWindowVisible(hwnd).as_bool();
+    if !visible {
+        return None;
+    }
     let root = GetAncestor(hwnd, GA_ROOT);
     let is_top_level = root == hwnd;
+    if !is_top_level {
+        return None;
+    }
 
     let mut title_buffer = [0u16; 1024];
     let title_len = GetWindowTextW(hwnd, &mut title_buffer);
-    let raw_title = if title_len > 0 {
-        String::from_utf16_lossy(&title_buffer[..title_len as usize])
-    } else {
-        String::new()
-    };
+    if title_len <= 0 {
+        return None;
+    }
+    let raw_title = String::from_utf16_lossy(&title_buffer[..title_len as usize]);
 
     let mut class_buffer = [0u16; 256];
     let class_len = GetClassNameW(hwnd, &mut class_buffer);
@@ -316,6 +224,19 @@ unsafe fn process_details(pid: u32) -> (Option<String>, Option<String>, Option<S
     )
     .ok()
     .map(|_| String::from_utf16_lossy(&path_buffer[..path_size as usize]));
+
+    // Browsers are intentionally outside Desktop tracking (the Chrome extension
+    // owns that surface). Avoid additional package/AUMID queries against them.
+    let executable_name = path
+        .as_deref()
+        .and_then(|value| Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(executable_name.as_str(), "chrome.exe" | "msedge.exe") {
+        let _ = CloseHandle(process);
+        return (path, None, None);
+    }
 
     let package_family_name = package_family_name(process);
     let app_user_model_id = app_user_model_id(process);
