@@ -31,8 +31,8 @@ mod tests {
 
     fn checkpoint() -> Checkpoint {
         Checkpoint {
-            context_id: "vscode:selfrelay".into(),
-            text: "La autenticación funciona. Falta revisar el refresh token.".into(),
+            context_id: "app:notepad.exe".into(),
+            text: "Terminé el borrador. Falta revisar el último párrafo.".into(),
             created_at_ms: 10,
             resolved_at_ms: None,
         }
@@ -41,15 +41,15 @@ mod tests {
     #[test]
     fn unresolved_checkpoint_recovers_only_for_same_context() {
         let checkpoint = checkpoint();
-        assert!(checkpoint.applies_to("vscode:selfrelay"));
-        assert!(!checkpoint.applies_to("vscode:otro-proyecto"));
+        assert!(checkpoint.applies_to("app:notepad.exe"));
+        assert!(!checkpoint.applies_to("app:calc.exe"));
     }
 
     #[test]
     fn resolved_checkpoint_does_not_recover() {
         let mut checkpoint = checkpoint();
         checkpoint.resolve(20);
-        assert!(!checkpoint.applies_to("vscode:selfrelay"));
+        assert!(!checkpoint.applies_to("app:notepad.exe"));
     }
 
     #[test]
@@ -57,7 +57,7 @@ mod tests {
         let mut checkpoint = checkpoint();
         checkpoint.defer();
         assert!(checkpoint.resolved_at_ms.is_none());
-        assert!(checkpoint.applies_to("vscode:selfrelay"));
+        assert!(checkpoint.applies_to("app:notepad.exe"));
     }
 
     #[test]
