@@ -4,6 +4,8 @@ use std::{collections::HashMap, sync::{atomic::{AtomicBool, AtomicU32, Ordering}
 
 #[cfg(windows)]
 mod windows;
+#[cfg(all(test, windows))]
+mod native_fixture_test;
 
 pub type WindowRegistry = Arc<Mutex<HashMap<isize, WindowRecord>>>;
 pub type ChangeNotifier = Arc<dyn Fn() + Send + Sync + 'static>;

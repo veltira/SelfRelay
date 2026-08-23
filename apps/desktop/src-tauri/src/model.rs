@@ -6,6 +6,8 @@ pub struct WindowMetadata {
     pub pid: u32,
     pub executable_path: Option<String>,
     pub executable_name: String,
+    pub package_family_name: Option<String>,
+    pub app_user_model_id: Option<String>,
     pub raw_title: String,
     pub visible: bool,
     pub is_top_level: bool,

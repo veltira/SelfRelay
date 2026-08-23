@@ -1,76 +1,81 @@
 # SelfRelay
 
-SelfRelay reduces the cost of resuming interrupted work.
+SelfRelay ayuda a retomar una tarea interrumpida sin perder el contexto mental de lo que estabas haciendo.
 
-**context → exit → checkpoint → return → automatic recovery**
+**contexto → interrupción → checkpoint → regreso → recuperación automática**
 
-This repository is the canonical source repository for the CoderCup AI 2026 project.
+Proyecto presentado a **CoderCup AI 2026**.
 
-## Download SelfRelay
+## Para el jurado de CoderCup
 
-End users and evaluators should **not** download the repository source ZIP or build SelfRelay themselves.
+Cuando dejamos una tarea a medias, normalmente no perdemos el archivo: perdemos el contexto. Al volver horas o días después tenemos que reconstruir qué estábamos haciendo, qué habíamos pensado y cuál era el siguiente paso.
 
-User-ready builds belong in **GitHub Releases** and are intentionally separated by platform:
+SelfRelay convierte esa interrupción en un punto de retorno. Al salir de un contexto de trabajo seguido por SelfRelay, el usuario puede dejar un checkpoint breve en texto o audio. Cuando vuelve al mismo contexto, SelfRelay recupera ese checkpoint para ayudarlo a continuar desde donde lo dejó.
 
-| Product | Download asset | Status |
+La forma más rápida de probarlo es:
+
+1. Descargar la versión correspondiente desde **GitHub Releases**.
+2. Instalarla siguiendo las instrucciones de esta página.
+3. Seleccionar o seguir un contexto de trabajo.
+4. Salir de ese contexto y guardar un checkpoint.
+5. Volver al mismo contexto y comprobar la recuperación automática.
+
+No se necesita compilar el proyecto, usar terminal, configurar API keys ni contratar servicios de IA pagos.
+
+## Privacidad
+
+Los checkpoints se almacenan localmente. El audio permanece en el dispositivo y la transcripción se ejecuta de forma explícita y bajo demanda mediante un runtime local de Whisper, sin enviar el audio a una API remota de transcripción.
+
+## Descargar SelfRelay
+
+Los usuarios y evaluadores **no deben descargar el ZIP del código fuente ni compilar el proyecto**. Las versiones preparadas para probar SelfRelay se distribuyen mediante **GitHub Releases**.
+
+| Versión | Archivo | Estado |
 | --- | --- | --- |
-| Chrome Extension | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validated and ready for stable release |
-| Windows Desktop | `SelfRelay-Setup.exe` | In active development; installer will be published after native validation |
+| Extensión para Chrome | `SelfRelay-Chrome.zip` | v0.4.3 validada |
+| Aplicación para Windows | `SelfRelay-Setup.exe` | Se publica cuando la candidata actual complete la validación física final |
 
-Open the repository's **Releases** page to download the product you want to test. A stable release may contain both assets; you only download the one you need.
+### Probar SelfRelay en Chrome
 
-### Chrome installation
+1. Descargar `SelfRelay-Chrome.zip` desde Releases.
+2. Extraer el ZIP.
+3. Abrir `chrome://extensions`.
+4. Activar **Modo desarrollador**.
+5. Elegir **Cargar descomprimida**.
+6. Seleccionar la carpeta extraída de SelfRelay.
+7. Abrir SelfRelay y seguir una pestaña, página o sitio.
+8. Salir o cerrar ese contexto y guardar un checkpoint en texto o audio.
+9. Volver al mismo contexto y comprobar que SelfRelay recupera el checkpoint pendiente.
 
-1. Download `SelfRelay-Chrome.zip` from Releases.
-2. Extract the ZIP.
-3. Open `chrome://extensions`.
-4. Enable **Developer mode**.
-5. Choose **Load unpacked**.
-6. Select the extracted SelfRelay folder.
+### Probar SelfRelay en Windows
 
-No Node.js, npm, Git, terminal, API key, model download or build step is required.
+Cuando `SelfRelay-Setup.exe` esté disponible en la Release estable:
 
-### Windows installation
+1. Descargar `SelfRelay-Setup.exe` desde la Release oficial.
+2. Ejecutar el instalador.
+3. Abrir SelfRelay y agregar una aplicación compatible.
+4. Utilizar esa aplicación normalmente y luego cerrarla.
+5. Guardar el checkpoint que presenta SelfRelay.
+6. Volver a abrir la misma aplicación o contexto.
+7. Comprobar que SelfRelay ofrece automáticamente el checkpoint pendiente para retomarlo.
 
-When the Windows build is published:
+## Aviso de Windows SmartScreen
 
-1. Download `SelfRelay-Setup.exe` from Releases.
-2. Double-click the installer.
-3. Install SelfRelay normally.
-4. Open SelfRelay.
+El instalador de Windows todavía no utiliza un certificado comercial de firma Authenticode. Por ese motivo, Microsoft Defender SmartScreen puede mostrar mensajes como **“Editor desconocido”** o **“Windows protegió su PC”** debido a la falta de reputación o firma del archivo.
 
-No development runtime or build tooling should be required by the evaluator.
+Ese aviso de SmartScreen, por sí solo, **no significa que Windows haya detectado malware**. Para probar la aplicación, el instalador debe descargarse únicamente desde la Release oficial de `veltira/SelfRelay` y comprobarse el SHA-256 publicado cuando corresponda. Una detección real de malware por parte del antivirus no debe ignorarse.
 
-See `docs/CODERCUP_DELIVERY.md` for the intended evaluator-facing delivery layout and `docs/DISTRIBUTION.md` for the packaging contract.
+## Qué hay dentro del repositorio
 
-## Source layout
+El repositorio contiene el código fuente y las pruebas del proyecto:
 
-The folders below are implementation source, not end-user downloads:
+- `apps/extension` — extensión de Chrome.
+- `apps/desktop` — aplicación de escritorio para Windows.
+- `packages/shared` — modelos y semántica compartida de contextos y checkpoints.
+- `docs` — documentación de comportamiento, distribución y validación.
 
-- `apps/extension` — Chrome Extension TypeScript source.
-- `apps/desktop` — Windows Desktop source once the Desktop milestone is merged into `main`.
-- `apps/web` — Optional web surface; intentionally deferred.
-- `packages/shared` — Shared Context/Checkpoint models and product semantics.
-- `docs` — Product behavior, distribution and validation documentation.
-- `artifacts/chrome-extension-unpacked` — Historical extension artifact only; not the current product build.
+La versión validada actualmente de la extensión de Chrome es **0.4.3**.
 
-## Chrome product
+## Desarrollo y validación
 
-The extension follows explicitly selected browser contexts by tab, exact page or site. When work is interrupted it captures a checkpoint; when the user returns it restores unresolved checkpoints relevant to that context.
-
-Checkpoints support text and local audio. Audio lives locally in IndexedDB. Transcription is on-demand and local, using the packaged Whisper.cpp/WASM runtime rather than a remote API.
-
-The current validated Chrome product version is **0.4.3**.
-
-## Development
-
-These commands are for contributors and CI only, not product users:
-
-```bash
-npm install
-npm run check
-```
-
-`.github/workflows/package.yml` validates the extension, packages the local Whisper assets, runs browser QA, produces `SelfRelay-Chrome.zip`, and is configured so version tags can publish that package through GitHub Releases.
-
-Do not mix this project with unrelated repositories or products.
+El proyecto incluye pruebas automáticas, empaquetado reproducible y validaciones específicas para los flujos principales de captura, recuperación y transcripción local. Los comandos y workflows de desarrollo están dentro del repositorio, pero **no son necesarios para que un evaluador pruebe SelfRelay**.

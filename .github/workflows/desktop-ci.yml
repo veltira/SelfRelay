@@ -10,7 +10,9 @@ on:
       - ".github/workflows/desktop-ci.yml"
       - "docs/DESKTOP_*"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "desktop/**"
     paths:
       - "apps/desktop/**"
       - ".github/workflows/desktop-ci.yml"
@@ -23,7 +25,7 @@ concurrency:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,21 +34,137 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate and validate Desktop branding
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --quiet "Pillow==11.3.0"
+          python apps/desktop/scripts/generate-branding.py
+      - name: Upload branding QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Branding-QA
+          path: artifacts/desktop-branding-qa
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci --workspaces=false --no-audit --no-fund
       - name: Frontend typecheck
         working-directory: apps/desktop
         run: npm run typecheck
-      - name: Frontend tests
+      - name: Frontend unit tests
         working-directory: apps/desktop
         run: npm test
+      - name: Build frontend for mock visual QA
+        working-directory: apps/desktop
+        run: npm run build
+      - name: Install visual QA browser
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55.0
+          npx playwright install chromium
+      - name: Desktop mock visual QA
+        working-directory: apps/desktop
+        run: npm run visual:qa
+      - name: Upload Desktop mock visual QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Mock-Visual-QA
+          path: artifacts/desktop-visual-qa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Prepare CI-only bundled resource placeholders
+        shell: pwsh
+        run: ./apps/desktop/scripts/prepare-ci-resources.ps1
       - name: Rust check
         working-directory: apps/desktop/src-tauri
-        run: cargo check --locked
-      - name: Rust tests
+        run: cargo check
+      - name: Rust unit tests
         working-directory: apps/desktop/src-tauri
-        run: cargo test --locked
+        run: cargo test
+      - name: Runtime capture and multi-app state matrix
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        env:
+          SELFRELAY_RUNTIME_REPORT: ${{ github.workspace }}\artifacts\desktop-runtime-state-qa\runtime-state.txt
+        run: cargo test runtime_capture_handoff_and_multi_app_matrix -- --nocapture
+      - name: Upload runtime state QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Runtime-State-QA
+          path: artifacts/desktop-runtime-state-qa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build native Win32 observer fixture
+        working-directory: apps/desktop/src-tauri
+        run: cargo build --bin selfrelay-window-fixture
+      - name: Run real Win32 observer + capture integration fixture
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        env:
+          SELFRELAY_FIXTURE_EXE: ${{ github.workspace }}\apps\desktop\src-tauri\target\debug\selfrelay-window-fixture.exe
+          SELFRELAY_FIXTURE_REPORT: ${{ github.workspace }}\artifacts\desktop-native-qa\native-observer-result.txt
+        run: cargo test native_win32_fixture_sequence -- --ignored --nocapture
+      - name: Upload native Windows QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Native-Windows-QA
+          path: artifacts/desktop-native-qa
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Tauri integration build
         working-directory: apps/desktop
         run: npm run tauri:build -- --debug --no-bundle
+      - name: Verify debug binary identity and PE GUI
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/debug/SelfRelay.exe"
+          if (-not (Test-Path $exe)) { throw "Expected SelfRelay.exe was not built" }
+          if (Test-Path (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/debug/selfrelay-desktop-core.exe")) {
+            throw "Historical selfrelay-desktop-core.exe binary was still emitted"
+          }
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+          Write-Host "Debug SelfRelay.exe PE subsystem: $subsystem"
+          if ($subsystem -ne 2) { throw "Debug SelfRelay.exe is not IMAGE_SUBSYSTEM_WINDOWS_GUI (2)" }
+
+      - name: Windows discovery quality gate
+        shell: pwsh
+        run: |
+          $qa = Join-Path $env:GITHUB_WORKSPACE "artifacts/desktop-discovery-qa"
+          New-Item -ItemType Directory -Force -Path $qa | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/debug/SelfRelay.exe"
+          $report = Join-Path $qa "discovery.json"
+          $process = Start-Process -FilePath $exe -ArgumentList @("--selfrelay-discovery-report", $report) -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Discovery quality probe failed with exit code $($process.ExitCode)" }
+          if (-not (Test-Path $report)) { throw "Discovery quality probe did not emit discovery.json" }
+          $items = @(Get-Content $report -Raw | ConvertFrom-Json)
+          if ($items.Count -eq 0) { throw "Discovery quality probe returned no user-facing applications on Windows runner" }
+          $resourcePattern = '^(##|ms-resource:|@\{|resource:)|##ID_STR|ms-resource://'
+          $internalPattern = 'TextInputHost|ScreenClippingHost|ShellExperienceHost|SearchHost|StartMenuExperienceHost|RuntimeBroker|ApplicationFrameHost|backgroundTaskHost|WWAHost|LockApp|WebExperience|WidgetsPlatformRuntime'
+          $badResource = @($items | Where-Object { [string]::IsNullOrWhiteSpace($_.applicationName) -or $_.applicationName -match $resourcePattern })
+          if ($badResource.Count -gt 0) { throw "Unresolved/empty discovery display name escaped filter: $($badResource[0].applicationName)" }
+          $badHost = @($items | Where-Object { ($_.applicationName + ' ' + $_.executableName + ' ' + $_.appUserModelId) -match $internalPattern })
+          if ($badHost.Count -gt 0) { throw "Internal Windows host escaped discovery filter: $($badHost[0].applicationName)" }
+          $canonical = @{}
+          foreach ($item in $items) {
+            $key = if ($item.packageFamilyName) { "package:$($item.packageFamilyName.ToLowerInvariant())" } elseif ($item.executablePath) { "path:$($item.executablePath.ToLowerInvariant().Replace('/','\'))" } elseif ($item.appUserModelId) { "aumid:$((($item.appUserModelId -split '!')[0]).ToLowerInvariant())" } else { $item.applicationId.ToLowerInvariant() }
+            if ($canonical.ContainsKey($key)) { throw "Duplicate canonical discovery identity: $key" }
+            $canonical[$key] = $true
+          }
+          Write-Host "Discovery quality PASS: $($items.Count) user-facing candidates"
+          $items | Select-Object -First 40 applicationName, executableName, executablePath, packageFamilyName, appUserModelId | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Upload Windows discovery QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfRelay-Desktop-Discovery-QA
+          path: artifacts/desktop-discovery-qa
+          if-no-files-found: error
+          retention-days: 14

@@ -1,4 +1,4 @@
-use crate::model::{ContextStability, NormalizedContext, WindowMetadata};
+use crate::{identity, model::{ContextStability, NormalizedContext, WindowMetadata}};
 
 pub trait ApplicationAdapter: Send + Sync {
     fn id(&self) -> &'static str;
@@ -69,7 +69,7 @@ impl ApplicationAdapter for VsCodeAdapter {
             parts.first().cloned().unwrap_or_else(|| "Visual Studio Code".into())
         };
         NormalizedContext {
-            application_id: "app:code.exe".into(),
+            application_id: identity::from_metadata(metadata),
             application_name: "Visual Studio Code".into(),
             adapter_id: self.id().into(),
             context_id: format!("vscode:{}", identity_component(&workspace)),
@@ -94,7 +94,7 @@ impl ApplicationAdapter for WordAdapter {
             &[" - Microsoft Word", " - Word"],
         ));
         NormalizedContext {
-            application_id: "app:winword.exe".into(),
+            application_id: identity::from_metadata(metadata),
             application_name: "Microsoft Word".into(),
             adapter_id: self.id().into(),
             context_id: format!("word:{}", identity_component(&document)),
@@ -115,7 +115,7 @@ impl ApplicationAdapter for ExcelAdapter {
     fn derive(&self, metadata: &WindowMetadata) -> NormalizedContext {
         let workbook = normalize_title(strip_suffix(&metadata.raw_title, &[" - Excel"]));
         NormalizedContext {
-            application_id: "app:excel.exe".into(),
+            application_id: identity::from_metadata(metadata),
             application_name: "Microsoft Excel".into(),
             adapter_id: self.id().into(),
             context_id: format!("excel:{}", identity_component(&workbook)),
@@ -131,15 +131,17 @@ impl ApplicationAdapter for GenericAdapter {
     fn matches(&self, _metadata: &WindowMetadata) -> bool { true }
 
     fn derive(&self, metadata: &WindowMetadata) -> NormalizedContext {
-        let exe = executable_name(metadata);
         let title = normalize_title(&metadata.raw_title);
         let app_label = metadata.executable_name.trim_end_matches(".exe").to_string();
+        let application_id = identity::from_metadata(metadata);
         NormalizedContext {
-            application_id: format!("app:{exe}"),
+            application_id: application_id.clone(),
             application_name: if app_label.is_empty() { "Application".into() } else { app_label },
             adapter_id: self.id().into(),
-            context_id: format!("generic:{exe}:{}", identity_component(&title)),
-            context_label: title,
+            // Generic applications expose no reliable document/workspace identity. Keep the
+            // selected application identity as the durable context instead of mutable titles.
+            context_id: application_id,
+            context_label: if title.is_empty() { metadata.executable_name.clone() } else { title },
             stability: ContextStability::Fallback,
         }
     }
@@ -165,6 +167,8 @@ mod tests {
             pid: 22,
             executable_path: Some(format!("C:/Program Files/{exe}")),
             executable_name: exe.into(),
+            package_family_name: None,
+            app_user_model_id: None,
             raw_title: title.into(),
             visible: true,
             is_top_level: true,
@@ -185,6 +189,7 @@ mod tests {
         assert_eq!(context.application_name, "Visual Studio Code");
         assert_eq!(context.context_label, "SelfRelay");
         assert_eq!(context.context_id, "vscode:selfrelay");
+        assert!(context.application_id.starts_with("path:"));
     }
 
     #[test]
@@ -192,6 +197,7 @@ mod tests {
         let a = derive_context(&metadata("Code.exe", "main.ts — SelfRelay — Visual Studio Code"));
         let b = derive_context(&metadata("Code.exe", "README.md — SelfRelay — Visual Studio Code"));
         assert_eq!(a.context_id, b.context_id);
+        assert_eq!(a.application_id, b.application_id);
     }
 
     #[test]
@@ -209,10 +215,12 @@ mod tests {
     }
 
     #[test]
-    fn generic_adapter_uses_executable_and_normalized_title() {
-        let context = derive_context(&metadata("notepad.exe", "  notes.txt  "));
-        assert_eq!(context.adapter_id, "generic");
-        assert_eq!(context.context_id, "generic:notepad.exe:notes.txt");
-        assert_eq!(context.stability, ContextStability::Fallback);
+    fn generic_adapter_uses_application_identity_not_window_title() {
+        let a = derive_context(&metadata("notepad.exe", "notes.txt - Notepad"));
+        let b = derive_context(&metadata("notepad.exe", "another.txt - Notepad"));
+        assert_eq!(a.adapter_id, "generic");
+        assert!(a.context_id.starts_with("path:"));
+        assert_eq!(a.context_id, b.context_id);
+        assert_eq!(a.stability, ContextStability::Fallback);
     }
 }
