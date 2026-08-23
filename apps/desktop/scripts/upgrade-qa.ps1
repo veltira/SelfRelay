@@ -5,10 +5,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "0.2.0"
+$Version = "0.2.1"
 $Control = Join-Path $env:RUNNER_TEMP "selfrelay-upgrade-qa"
-$LegacyDir = Join-Path $Control "legacy-install"
-$LegacyExe = Join-Path $LegacyDir "selfrelay-desktop-core.exe"
+$LegacyDir = Join-Path $Control "legacy-0.2.0-install"
+$LegacyExe = Join-Path $LegacyDir "SelfRelay.exe"
 $DataDir = Join-Path $env:LOCALAPPDATA "com.veltira.selfrelay"
 $Database = Join-Path $DataDir "selfrelay.db"
 
@@ -16,7 +16,8 @@ Remove-Item $Control -Force -Recurse -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Control, $LegacyDir, $DataDir | Out-Null
 Copy-Item $Fixture $LegacyExe -Force
 
-# Represent an installed 0.1.1 data store with a real unresolved checkpoint.
+# Reproduce the exact persistence shape used by 0.2.0: schema v3, legacy
+# app:<basename> identities, selections, settings, workset membership and history.
 $CreateDb = @'
 import sqlite3, sys, os
 path=sys.argv[1]
@@ -25,90 +26,90 @@ if os.path.exists(path): os.remove(path)
 c=sqlite3.connect(path)
 c.executescript("""
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL);
-INSERT INTO schema_migrations VALUES(1,0); INSERT INTO schema_migrations VALUES(2,0);
+INSERT INTO schema_migrations VALUES(1,0); INSERT INTO schema_migrations VALUES(2,0); INSERT INTO schema_migrations VALUES(3,0);
 CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO settings VALUES('tracking_paused','0');
 INSERT INTO settings VALUES('desktop_onboarding_completed','1');
+INSERT INTO settings VALUES('launch_at_startup','0');
 CREATE TABLE tracking_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, application_id TEXT NOT NULL, context_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at_ms INTEGER NOT NULL, application_name TEXT, executable_path TEXT);
 INSERT INTO tracking_rules(scope,application_id,context_id,enabled,created_at_ms,application_name,executable_path) VALUES('application','app:notepad.exe',NULL,1,1,'Notepad','C:\\Windows\\System32\\notepad.exe');
 CREATE TABLE active_context_journal(context_id TEXT PRIMARY KEY, application_id TEXT NOT NULL, state TEXT NOT NULL, payload_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
-CREATE TABLE checkpoints(id INTEGER PRIMARY KEY AUTOINCREMENT, application_id TEXT NOT NULL, application_name TEXT NOT NULL, context_id TEXT NOT NULL, context_label TEXT NOT NULL, text TEXT NOT NULL, created_at_ms INTEGER NOT NULL, resolved_at_ms INTEGER);
-INSERT INTO checkpoints(application_id,application_name,context_id,context_label,text,created_at_ms,resolved_at_ms) VALUES('app:notepad.exe','Notepad','app:notepad.exe','Notepad','checkpoint-preserved-from-0.1.1',12345,NULL);
+CREATE TABLE checkpoints(id INTEGER PRIMARY KEY AUTOINCREMENT, application_id TEXT NOT NULL, application_name TEXT NOT NULL, context_id TEXT NOT NULL, context_label TEXT NOT NULL, text TEXT NOT NULL, created_at_ms INTEGER NOT NULL, resolved_at_ms INTEGER, workset_id TEXT, audio_path TEXT, transcript TEXT);
+INSERT INTO checkpoints(application_id,application_name,context_id,context_label,text,created_at_ms,resolved_at_ms,workset_id,audio_path,transcript) VALUES('app:notepad.exe','Notepad','app:notepad.exe','Notepad','checkpoint-preserved-from-0.2.0',12345,NULL,NULL,NULL,NULL);
 CREATE INDEX idx_checkpoints_context_pending ON checkpoints(context_id, resolved_at_ms, created_at_ms);
+CREATE TABLE worksets(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL);
+CREATE TABLE workset_applications(workset_id TEXT NOT NULL, application_id TEXT NOT NULL, PRIMARY KEY(workset_id, application_id), FOREIGN KEY(workset_id) REFERENCES worksets(id) ON DELETE CASCADE);
+INSERT INTO worksets VALUES('ws:upgrade','Upgrade project',1,1);
+INSERT INTO workset_applications VALUES('ws:upgrade','app:notepad.exe');
 """)
 c.commit(); c.close()
 '@
 python -c $CreateDb $Database
-if ($LASTEXITCODE -ne 0) { throw "Could not create legacy schema v2 database" }
+if ($LASTEXITCODE -ne 0) { throw "Could not create 0.2.0 schema v3 database" }
 
-# Run the legacy GUI fixture under the exact historical process filename.
+# Represent a resident 0.2.0 GUI process under the final executable name.
 $Legacy = Start-Process -FilePath $LegacyExe -ArgumentList @("--legacy-upgrade", "--control", $Control) -PassThru
 $Deadline = (Get-Date).AddSeconds(20)
 while (-not (Test-Path (Join-Path $Control "legacy-ready.txt"))) {
-  if ((Get-Date) -gt $Deadline) { throw "Legacy SelfRelay fixture never became ready" }
+  if ((Get-Date) -gt $Deadline) { throw "0.2.0 SelfRelay fixture never became ready" }
   Start-Sleep -Milliseconds 100
 }
-if ($Legacy.HasExited) { throw "Legacy SelfRelay exited before upgrade began" }
+if ($Legacy.HasExited) { throw "0.2.0 SelfRelay exited before upgrade began" }
 
-# Install the actual 0.2.0 NSIS package while the old process owns a SelfRelay window.
 $Install = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru -Wait
-if ($Install.ExitCode -ne 0) { throw "0.2.0 silent install failed with $($Install.ExitCode)" }
+if ($Install.ExitCode -ne 0) { throw "0.2.1 silent install failed with $($Install.ExitCode)" }
 $Legacy.Refresh()
-if (-not $Legacy.HasExited) { throw "Installer left the old selfrelay-desktop-core.exe process running" }
-if (-not (Test-Path (Join-Path $Control "legacy-closed.txt"))) { throw "Legacy process did not leave through its native message loop" }
+if (-not $Legacy.HasExited) { throw "0.2.1 installer left the old SelfRelay.exe process running" }
+if (-not (Test-Path (Join-Path $Control "legacy-closed.txt"))) { throw "Old process did not leave through its native message loop" }
 
 $Candidates = Get-ChildItem $env:LOCALAPPDATA -Filter "SelfRelay.exe" -File -Recurse -ErrorAction SilentlyContinue |
-  Where-Object { $_.FullName -notlike "*$Control*" } |
-  Sort-Object LastWriteTimeUtc -Descending
+  Where-Object { $_.FullName -notlike "*$Control*" } | Sort-Object LastWriteTimeUtc -Descending
 $NewExe = $Candidates | Select-Object -First 1
 if (-not $NewExe) { throw "Installed SelfRelay.exe could not be located" }
 if (Test-Path (Join-Path $NewExe.DirectoryName "selfrelay-desktop-core.exe")) { throw "Historical executable survived inside new install directory" }
 
-# PE gate on the executable the installer actually placed.
 function Get-PESubsystem([string]$Path) {
-  $bytes = [System.IO.File]::ReadAllBytes($Path)
-  $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-  $optionalHeader = $peOffset + 24
-  return [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
+  $bytes = [System.IO.File]::ReadAllBytes($Path); $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+  return [BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
 }
 $InstalledSubsystem = Get-PESubsystem $NewExe.FullName
 if ($InstalledSubsystem -ne 2) { throw "Installed SelfRelay.exe is not Windows GUI subsystem: $InstalledSubsystem" }
 
-# Launch the installed product. This is the code path that performs the real DB migration.
+# Real 0.2.1 startup performs legacy identity migration and creates durable capture tables.
 $NewProcess = Start-Process -FilePath $NewExe.FullName -PassThru
-$Deadline = (Get-Date).AddSeconds(20)
-$MigrationOk = $false
+$Deadline = (Get-Date).AddSeconds(20); $MigrationOk = $false
 while ((Get-Date) -lt $Deadline) {
   $VerifyDb = @'
 import sqlite3, sys
 c=sqlite3.connect(sys.argv[1])
 version=c.execute('select coalesce(max(version),0) from schema_migrations').fetchone()[0]
-row=c.execute("select text, workset_id, audio_path, transcript from checkpoints where text='checkpoint-preserved-from-0.1.1'").fetchone()
-print(f'{version}|{row!r}')
-raise SystemExit(0 if version == 3 and row and row[0] == 'checkpoint-preserved-from-0.1.1' and row[1:] == (None,None,None) else 2)
+checkpoint=c.execute("select application_id,context_id,text from checkpoints where text='checkpoint-preserved-from-0.2.0'").fetchone()
+tracked=c.execute("select application_id,application_name,executable_path from tracking_rules where enabled=1").fetchone()
+member=c.execute("select application_id from workset_applications where workset_id='ws:upgrade'").fetchone()
+settings=dict(c.execute("select key,value from settings where key in ('tracking_paused','desktop_onboarding_completed','launch_at_startup')"))
+pending_table=c.execute("select count(*) from sqlite_master where type='table' and name='pending_captures'").fetchone()[0]
+ok=(version>=5 and checkpoint and tracked and member and checkpoint[2]=='checkpoint-preserved-from-0.2.0' and tracked[1]=='Notepad' and tracked[2].lower().endswith('notepad.exe') and tracked[0]==checkpoint[0]==checkpoint[1]==member[0] and tracked[0] != 'app:notepad.exe' and settings=={'tracking_paused':'0','desktop_onboarding_completed':'1','launch_at_startup':'0'} and pending_table==1)
+print(f'version={version} tracked={tracked} checkpoint={checkpoint} member={member} settings={settings} pending_table={pending_table}')
+raise SystemExit(0 if ok else 2)
 '@
   python -c $VerifyDb $Database 2>$null
   if ($LASTEXITCODE -eq 0) { $MigrationOk = $true; break }
   Start-Sleep -Milliseconds 250
 }
-if (-not $MigrationOk) { throw "0.2.0 did not migrate/preserve legacy SQLite v2 data" }
+if (-not $MigrationOk) { throw "0.2.1 did not preserve/migrate 0.2.0 selections, settings, worksets and checkpoint data" }
 if ($NewProcess.HasExited) { throw "Installed SelfRelay.exe terminated unexpectedly after launch" }
 
-# Single-instance: launching SelfRelay again must not create a second resident process.
 $Before = @(Get-Process -Name "SelfRelay" -ErrorAction SilentlyContinue).Count
 $Second = Start-Process -FilePath $NewExe.FullName -PassThru
 Start-Sleep -Seconds 2
 $After = @(Get-Process -Name "SelfRelay" -ErrorAction SilentlyContinue).Count
 if ($Before -ne 1 -or $After -ne 1) { throw "Single-instance gate failed: before=$Before after=$After" }
 
-# The running new app is intentionally closed by reinstalling the same package,
-# proving the updater can also replace the final process name without stale UI.
 $Reinstall = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru -Wait
 if ($Reinstall.ExitCode -ne 0) { throw "Reinstall over running SelfRelay.exe failed" }
 Start-Sleep -Milliseconds 600
 if (@(Get-Process -Name "SelfRelay" -ErrorAction SilentlyContinue).Count -ne 0) { throw "Reinstall left a stale SelfRelay.exe resident" }
 
-# Version probe starts the exact installed GUI binary and exits without a console.
 $VersionFile = Join-Path $Control "version.txt"
 $Probe = Start-Process -FilePath $NewExe.FullName -ArgumentList @("--selfrelay-version-file", $VersionFile) -PassThru -Wait
 if ($Probe.ExitCode -ne 0 -or -not (Test-Path $VersionFile)) { throw "Installed version probe failed" }
@@ -120,7 +121,6 @@ $StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\SelfR
 $Uninstaller = Get-ChildItem $NewExe.DirectoryName -Filter "uninstall*.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $Uninstaller) { throw "SelfRelay uninstaller is missing" }
 
-# Verify uninstall removes program/autostart but preserves user data.
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SelfRelay" -Value "`"$($NewExe.FullName)`" --autostart" -Force
 $Uninstall = Start-Process -FilePath $Uninstaller.FullName -ArgumentList "/S" -PassThru -Wait
 if ($Uninstall.ExitCode -ne 0) { throw "SelfRelay uninstall failed: $($Uninstall.ExitCode)" }
@@ -129,16 +129,20 @@ if (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 if (-not (Test-Path $Database)) { throw "Uninstall unexpectedly deleted local user data" }
 
 $Lines = @(
-  "legacy_process_name=selfrelay-desktop-core.exe"
+  "upgrade_from=0.2.0"
+  "legacy_process_name=SelfRelay.exe"
   "legacy_running_before_install=PASS"
   "legacy_process_closed_by_installer=PASS"
   "installed_binary_name=SelfRelay.exe"
-  "historical_binary_removed=PASS"
   "installed_pe_subsystem=$InstalledSubsystem"
   "installed_version=$InstalledVersion"
+  "selection_preserved_and_identity_migrated=PASS"
+  "settings_preserved=PASS"
+  "workset_membership_preserved=PASS"
+  "checkpoint_preserved=PASS"
+  "durable_pending_capture_schema=PASS"
   "new_running_process_closed_on_reinstall=PASS"
   "single_instance=PASS"
-  "sqlite_v2_to_v3_preserves_checkpoint=PASS"
   "uninstall_removes_binary=PASS"
   "uninstall_removes_autostart=PASS"
   "uninstall_preserves_local_data=PASS"
