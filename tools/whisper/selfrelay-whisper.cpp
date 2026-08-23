@@ -28,6 +28,8 @@ void selfrelay_whisper_log(ggml_log_level level, const char * text, void *) {
             emscripten_console_warn(text);
             break;
         case GGML_LOG_LEVEL_DEBUG:
+            // Match whisper.cpp's default non-debug build behavior.
+            return;
         case GGML_LOG_LEVEL_INFO:
         case GGML_LOG_LEVEL_NONE:
         case GGML_LOG_LEVEL_CONT:
