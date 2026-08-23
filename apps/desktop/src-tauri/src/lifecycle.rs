@@ -2,7 +2,7 @@ use crate::model::WindowRecord;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-pub const EXIT_GRACE_MS: u64 = 300;
+pub const EXIT_GRACE_MS: u64 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
