@@ -1,91 +1,149 @@
 from __future__ import annotations
 
+import hashlib
+import shutil
 from pathlib import Path
+
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCE = ROOT / "assets" / "branding" / "selfrelay-logo.png"
+SOURCE = ROOT / "apps" / "desktop" / "assets" / "selfrelay-logo.png"
 ICONS = ROOT / "apps" / "desktop" / "src-tauri" / "icons"
 QA = ROOT / "artifacts" / "desktop-branding-qa"
 SIZES = (16, 24, 32, 48, 64, 128, 256)
-QA_SIZES = (16, 32, 48, 256)
+QA_SIZES = (16, 32, 48, 128, 256)
 
 
-def build_square() -> Image.Image:
-    source = Image.open(SOURCE).convert("RGBA")
-    bbox = source.getbbox()
-    if bbox:
-        source = source.crop(bbox)
-    canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-    # Reserve enough transparent breathing room to prevent taskbar/tray clipping.
-    available = (388, 388)
-    source.thumbnail(available, Image.Resampling.LANCZOS)
-    x = (canvas.width - source.width) // 2
-    y = (canvas.height - source.height) // 2
-    canvas.alpha_composite(source, (x, y))
-    return canvas
-
-
-def validate(image: Image.Image, size: int) -> None:
+def validate_pixels(image: Image.Image, label: str) -> Image.Image:
     rgba = image.convert("RGBA")
+    if rgba.width != rgba.height:
+        raise RuntimeError(f"{label} must be square, got {rgba.width}x{rgba.height}")
+    if rgba.width <= 0:
+        raise RuntimeError(f"{label} has invalid dimensions")
+
     alpha = rgba.getchannel("A")
+    minimum, maximum = alpha.getextrema()
+    if maximum == 0:
+        raise RuntimeError(f"{label} is fully transparent")
+    if minimum == 255:
+        raise RuntimeError(f"{label} has no real transparency")
+
     bbox = alpha.getbbox()
     if bbox is None:
-        raise RuntimeError(f"{size}px branding frame is fully transparent")
+        raise RuntimeError(f"{label} contains no visible artwork")
     left, top, right, bottom = bbox
-    if left <= 0 or top <= 0 or right >= size or bottom >= size:
-        raise RuntimeError(f"{size}px branding frame touches canvas edge: {bbox}")
+    if left <= 0 or top <= 0 or right >= rgba.width or bottom >= rgba.height:
+        raise RuntimeError(f"{label} artwork touches the canvas edge: {bbox}")
+
     visible = sum(1 for value in alpha.getdata() if value > 12)
-    if visible < max(8, size * size // 45):
-        raise RuntimeError(f"{size}px branding frame contains too little visible artwork")
+    if visible < max(8, rgba.width * rgba.height // 45):
+        raise RuntimeError(f"{label} contains too little visible artwork")
+    return rgba
+
+
+def open_verified_png(path: Path, expected_size: int | None = None) -> Image.Image:
+    if not path.is_file():
+        raise RuntimeError(f"PNG missing: {path}")
+
+    with Image.open(path) as probe:
+        if probe.format != "PNG":
+            raise RuntimeError(f"Expected PNG at {path}, got {probe.format}")
+        probe.verify()
+
+    with Image.open(path) as reopened:
+        reopened.load()
+        rgba = validate_pixels(reopened, str(path))
+
+    if expected_size is not None and rgba.size != (expected_size, expected_size):
+        raise RuntimeError(f"{path} expected {expected_size}x{expected_size}, got {rgba.size}")
+    return rgba
+
+
+def save_verified_png(image: Image.Image, path: Path, expected_size: int) -> Image.Image:
+    image.save(path, format="PNG", optimize=True)
+    return open_verified_png(path, expected_size)
+
+
+def verify_ico(path: Path) -> set[tuple[int, int]]:
+    with Image.open(path) as probe:
+        if probe.format != "ICO":
+            raise RuntimeError(f"Expected ICO at {path}, got {probe.format}")
+        probe.verify()
+
+    with Image.open(path) as ico:
+        decoder = getattr(ico, "ico", None)
+        if decoder is None:
+            raise RuntimeError("Pillow could not expose ICO frames")
+        embedded = set(decoder.sizes())
+        required = {(size, size) for size in SIZES}
+        missing = required - embedded
+        if missing:
+            raise RuntimeError(f"ICO is missing required frames: {sorted(missing)}")
+        for size in SIZES:
+            extracted = decoder.getimage((size, size))
+            validate_pixels(extracted, f"ICO {size}x{size} frame")
+    return embedded
 
 
 def main() -> None:
-    if not SOURCE.is_file():
-        raise SystemExit(f"Canonical SelfRelay logo missing: {SOURCE}")
+    source = open_verified_png(SOURCE)
+    if source.width < 128:
+        raise RuntimeError(f"Desktop branding master is unexpectedly small: {source.size}")
+
     ICONS.mkdir(parents=True, exist_ok=True)
+    if QA.exists():
+        shutil.rmtree(QA)
     QA.mkdir(parents=True, exist_ok=True)
-    base = build_square()
 
     frames: dict[int, Image.Image] = {}
     for size in SIZES:
-        frame = base.resize((size, size), Image.Resampling.LANCZOS)
-        validate(frame, size)
-        frames[size] = frame
-        frame.save(ICONS / f"{size}x{size}.png", optimize=True)
+        frame = source.resize((size, size), Image.Resampling.LANCZOS)
+        frames[size] = save_verified_png(frame, ICONS / f"{size}x{size}.png", size)
 
-    frames[128].save(ICONS / "128x128@2x.png", optimize=True)
-    frames[32].save(ICONS / "tray.png", optimize=True)
-    frames[48].save(ICONS / "window.png", optimize=True)
-    frames[48].save(ICONS / "taskbar.png", optimize=True)
-    frames[256].save(ICONS / "installer.png", optimize=True)
-    frames[256].save(ICONS / "start-menu.png", optimize=True)
+    save_verified_png(frames[256], ICONS / "128x128@2x.png", 256)
+    save_verified_png(frames[32], ICONS / "tray.png", 32)
+    save_verified_png(frames[48], ICONS / "window.png", 48)
+    save_verified_png(frames[48], ICONS / "taskbar.png", 48)
+    save_verified_png(frames[256], ICONS / "installer.png", 256)
+    save_verified_png(frames[256], ICONS / "start-menu.png", 256)
 
-    base.save(
-        ICONS / "icon.ico",
+    ico_path = ICONS / "icon.ico"
+    frames[256].save(
+        ico_path,
         format="ICO",
         sizes=[(size, size) for size in SIZES],
         bitmap_format="png",
     )
+    embedded = verify_ico(ico_path)
 
-    ico = Image.open(ICONS / "icon.ico")
-    embedded = set(getattr(ico, "ico").sizes())
-    missing = set((size, size) for size in SIZES) - embedded
-    if missing:
-        raise RuntimeError(f"ICO is missing required frames: {sorted(missing)}")
+    with Image.open(ico_path) as ico:
+        decoder = getattr(ico, "ico")
+        for size in QA_SIZES:
+            extracted = decoder.getimage((size, size)).convert("RGBA")
+            save_verified_png(extracted, QA / f"selfrelay-icon-{size}.png", size)
 
-    for size in QA_SIZES:
-        extracted = getattr(ico, "ico").getimage((size, size)).convert("RGBA")
-        validate(extracted, size)
-        extracted.save(QA / f"selfrelay-icon-{size}.png", optimize=True)
+    preview = source.resize((512, 512), Image.Resampling.LANCZOS)
+    save_verified_png(preview, QA / "selfrelay-logo-interface-512.png", 512)
 
+    source_sha256 = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
     (QA / "branding-qa.txt").write_text(
-        "canonical=assets/branding/selfrelay-logo.png\n"
+        "source=apps/desktop/assets/selfrelay-logo.png\n"
+        f"source_sha256={source_sha256}\n"
+        f"source_dimensions={source.width}x{source.height}\n"
+        "source_verify=PASS\n"
+        "source_rgba=PASS\n"
+        "source_transparency=PASS\n"
+        f"png_frames={','.join(str(size) for size in SIZES)}\n"
         f"ico_frames={','.join(str(size) for size in SIZES)}\n"
-        "aspect_ratio=preserved\ncanvas=transparent\nvalidation=PASS\n",
+        "ico_decode_all_frames=PASS\n"
+        "aspect_ratio=preserved\n"
+        "cropping=none\n"
+        "validation=PASS\n",
         encoding="utf-8",
     )
+
     print("SelfRelay branding QA PASS")
+    print(f"Source: {SOURCE} ({source.size}) sha256={source_sha256}")
     print(f"ICO frames: {sorted(embedded)}")
 
 
