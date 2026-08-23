@@ -3,352 +3,250 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import logoUrl from "../../../assets/branding/selfrelay-logo.png";
 import type {
+  ApplicationIcon,
+  CaptureView,
   CheckpointRecord,
-  ContextSnapshot,
   DiscoveredApplication,
   RecoveryView,
+  SettingsView,
   TrackedApplication,
-  TrackingStatus,
+  WorksetView,
 } from "./types";
 
-const DESKTOP_VERSION = "0.1.1";
+const PRODUCT_VERSION = "0.2.0";
+const iconCache = new Map<string, string>();
 
-function appInitial(name: string) {
-  return name.trim().slice(0, 1).toUpperCase() || "A";
+type MainSection = "apps" | "worksets" | "history" | "settings";
+
+function formatTime(value: number) {
+  return new Intl.DateTimeFormat("es-UY", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function formatCheckpointTime(value: number) {
+function encodeWav(samples: Float32Array, sampleRate: number) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const write = (offset: number, text: string) => {
+    for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
+    view.setInt16(44 + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+  return new Uint8Array(buffer);
+}
+
+async function mediaBlobToWav(blob: Blob) {
+  const context = new AudioContext();
   try {
-    return new Intl.DateTimeFormat("es-UY", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-  } catch {
-    return "";
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    const sampleRate = 16_000;
+    const frames = Math.max(1, Math.ceil(decoded.duration * sampleRate));
+    const offline = new OfflineAudioContext(1, frames, sampleRate);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return encodeWav(rendered.getChannelData(0), sampleRate);
+  } finally {
+    await context.close();
   }
 }
 
-function byApplicationName<T extends { applicationName: string }>(a: T, b: T) {
-  return a.applicationName.localeCompare(b.applicationName);
+function applicationToTracked(application: DiscoveredApplication): TrackedApplication {
+  return { applicationId: application.applicationId, applicationName: application.applicationName, executablePath: application.executablePath };
+}
+
+function AppIcon({ app, size = 36 }: { app: TrackedApplication; size?: number }) {
+  const key = app.executablePath ?? app.applicationId;
+  const [src, setSrc] = useState<string | null>(() => iconCache.get(key) ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    const cached = iconCache.get(key);
+    if (cached) { setSrc(cached); return () => { cancelled = true; }; }
+    void invoke<ApplicationIcon>("get_application_icon", { executablePath: app.executablePath ?? null })
+      .then((icon) => {
+        if (cancelled || icon.rgba.length !== icon.width * icon.height * 4) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = icon.width;
+        canvas.height = icon.height;
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.putImageData(new ImageData(new Uint8ClampedArray(icon.rgba), icon.width, icon.height), 0, 0);
+        const url = canvas.toDataURL("image/png");
+        iconCache.set(key, url);
+        if (!cancelled) setSrc(url);
+      })
+      .catch(() => setSrc(null));
+    return () => { cancelled = true; };
+  }, [app.executablePath, key]);
+  return <span className="native-app-icon" style={{ width: size, height: size }} aria-hidden="true">{src ? <img src={src} alt="" /> : <span className="icon-fallback"><span /></span>}</span>;
+}
+
+function Brand({ compact = false }: { compact?: boolean }) {
+  return <div className={`brand ${compact ? "brand-compact" : ""}`}><span className="brand-mark"><img src={logoUrl} alt="" /></span><span>SelfRelay</span></div>;
+}
+
+function Notice({ children, error = false }: { children: React.ReactNode; error?: boolean }) {
+  return <div className={`notice ${error ? "notice-error" : ""}`}>{children}</div>;
+}
+
+function AppRow({ app, detail, action, actionLabel, mutedAction = false }: { app: TrackedApplication; detail: string; action?: () => void; actionLabel?: string; mutedAction?: boolean }) {
+  return <div className="app-row"><AppIcon app={app} /><div className="row-copy"><strong>{app.applicationName}</strong><span>{detail}</span></div>{action && actionLabel && <button className={`button button-small ${mutedAction ? "button-secondary" : "button-primary"}`} onClick={action}>{actionLabel}</button>}</div>;
+}
+
+function Onboarding({ discovered, initialTracked, onComplete, onPick, busy }: { discovered: DiscoveredApplication[]; initialTracked: TrackedApplication[]; onComplete: (apps: TrackedApplication[]) => Promise<void>; onPick: () => Promise<TrackedApplication | null>; busy: boolean }) {
+  const [selected, setSelected] = useState(() => new Map(initialTracked.map((app) => [app.applicationId, app])));
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(() => { const term = search.trim().toLocaleLowerCase(); return discovered.filter((app) => !term || app.applicationName.toLocaleLowerCase().includes(term)); }, [discovered, search]);
+  const toggle = (app: DiscoveredApplication) => setSelected((current) => { const next = new Map(current); if (next.has(app.applicationId)) next.delete(app.applicationId); else next.set(app.applicationId, applicationToTracked(app)); return next; });
+  const pick = async () => { const app = await onPick(); if (app) setSelected((current) => new Map(current).set(app.applicationId, app)); };
+  return <main className="onboarding-page"><section className="onboarding-panel"><Brand /><div className="onboarding-copy"><h1>Elegí las aplicaciones donde trabajás.</h1><p>SelfRelay solo seguirá las que elijas. Podés cambiarlas en cualquier momento.</p></div><label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar aplicaciones" autoFocus /></label><div className="select-list" role="list">{filtered.length === 0 ? <div className="empty-inline">No encontramos otra aplicación útil. Podés elegir un .exe manualmente.</div> : filtered.map((app) => { const checked = selected.has(app.applicationId); return <button className={`select-app ${checked ? "selected" : ""}`} key={app.applicationId} onClick={() => toggle(app)}><AppIcon app={app} size={38} /><span className="select-copy"><strong>{app.applicationName}</strong><small>{app.running ? "Abierta ahora" : "Instalada"}</small></span><span className={`check-control ${checked ? "checked" : ""}`}>{checked ? "✓" : ""}</span></button>; })}</div><div className="onboarding-footer"><button className="button button-secondary" disabled={busy} onClick={() => void pick()}>Elegir otra aplicación…</button><button className="button button-primary" disabled={busy} onClick={() => void onComplete([...selected.values()])}>Continuar</button></div><p className="privacy-copy">Todo queda en este equipo. SelfRelay no lee tus documentos, no registra teclas y no sube checkpoints a la nube.</p></section></main>;
+}
+
+function AudioPlayback({ checkpoint }: { checkpoint: CheckpointRecord }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  const load = async () => { setBusy(true); try { const bytes = await invoke<number[]>("get_checkpoint_audio", { id: checkpoint.id }); const next = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "audio/wav" })); if (url) URL.revokeObjectURL(url); setUrl(next); setError(null); } catch (cause) { setError(String(cause)); } finally { setBusy(false); } };
+  if (!checkpoint.audioPath) return null;
+  return <div className="checkpoint-audio">{url ? <audio controls src={url} /> : <button className="text-link" disabled={busy} onClick={() => void load()}>{busy ? "Cargando audio…" : "Escuchar audio"}</button>}{error && <small className="inline-error">{error}</small>}</div>;
+}
+
+function ApplicationsSection({ discovered, tracked, busy, onAdd, onRemove, onPick, onManualCheckpoint }: { discovered: DiscoveredApplication[]; tracked: TrackedApplication[]; busy: boolean; onAdd: (app: TrackedApplication) => Promise<void>; onRemove: (app: TrackedApplication) => Promise<void>; onPick: () => Promise<void>; onManualCheckpoint: () => Promise<void> }) {
+  const [search, setSearch] = useState("");
+  const running = useMemo(() => new Set(discovered.filter((app) => app.running).map((app) => app.applicationId)), [discovered]);
+  const trackedIds = useMemo(() => new Set(tracked.map((app) => app.applicationId)), [tracked]);
+  const available = useMemo(() => { const term = search.trim().toLocaleLowerCase(); return discovered.filter((app) => !trackedIds.has(app.applicationId) && (!term || app.applicationName.toLocaleLowerCase().includes(term))); }, [discovered, trackedIds, search]);
+  return <section className="main-section"><div className="section-title-row"><div><h1>Aplicaciones</h1><p>SelfRelay observa únicamente las aplicaciones que añadiste.</p></div><button className="button button-secondary" disabled={busy} onClick={() => void onManualCheckpoint()}>Guardar checkpoint ahora</button></div><div className="section-block"><div className="block-title"><h2>En seguimiento</h2><span>{tracked.length}</span></div>{tracked.length === 0 ? <div className="empty-line"><strong>No hay aplicaciones en seguimiento.</strong><span>SelfRelay no generará checkpoints hasta que añadas una.</span></div> : tracked.map((app) => <AppRow key={app.applicationId} app={app} detail={running.has(app.applicationId) ? "Activa" : "Esperando"} action={() => void onRemove(app)} actionLabel="Quitar" mutedAction />)}</div><div className="section-block"><div className="block-title"><h2>Disponibles</h2><span>{available.length}</span></div><label className="search-box compact"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar una aplicación" /></label>{available.slice(0, 18).map((app) => <AppRow key={app.applicationId} app={app} detail={app.running ? "Abierta ahora" : "Instalada"} action={() => void onAdd(applicationToTracked(app))} actionLabel="Añadir" />)}{available.length === 0 && <div className="empty-line"><span>No hay más aplicaciones que coincidan con la búsqueda.</span></div>}<div className="manual-choice"><span>¿No aparece?</span><button className="text-link" disabled={busy} onClick={() => void onPick()}>Elegir otra aplicación…</button></div></div></section>;
+}
+
+function WorksetsSection({ worksets, tracked, onCreate, onRename, onMembers, onDelete }: { worksets: WorksetView[]; tracked: TrackedApplication[]; onCreate: (name: string, ids: string[]) => Promise<void>; onRename: (id: string, name: string) => Promise<void>; onMembers: (id: string, ids: string[]) => Promise<void>; onDelete: (id: string) => Promise<void> }) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newMembers, setNewMembers] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<string | null>(null);
+  const trackedMap = useMemo(() => new Map(tracked.map((app) => [app.applicationId, app])), [tracked]);
+  const submit = async () => { if (!newName.trim()) return; await onCreate(newName, [...newMembers]); setNewName(""); setNewMembers(new Set()); setCreating(false); };
+  return <section className="main-section"><div className="section-title-row"><div><h1>Entornos</h1><p>Agrupá aplicaciones que forman parte del mismo trabajo.</p></div><button className="button button-primary" onClick={() => setCreating(true)}>Crear entorno</button></div>{creating && <div className="workset-editor"><label><span>Nombre</span><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Proyecto CoderCup" autoFocus /></label><div className="member-picker">{tracked.map((app) => <label key={app.applicationId} className="member-option"><input type="checkbox" checked={newMembers.has(app.applicationId)} onChange={() => setNewMembers((current) => { const next = new Set(current); if (next.has(app.applicationId)) next.delete(app.applicationId); else next.add(app.applicationId); return next; })} /><AppIcon app={app} size={28} /><span>{app.applicationName}</span></label>)}</div><div className="editor-actions"><button className="button button-secondary" onClick={() => setCreating(false)}>Cancelar</button><button className="button button-primary" onClick={() => void submit()}>Crear</button></div></div>}<div className="workset-list">{worksets.length === 0 && <div className="empty-line"><strong>Todavía no hay entornos.</strong><span>Un entorno puede ser, por ejemplo, “Proyecto CoderCup” con Word, Paint y Notepad.</span></div>}{worksets.map((workset) => { const memberApps = workset.applicationIds.map((id) => trackedMap.get(id)).filter(Boolean) as TrackedApplication[]; const isEditing = editing === workset.id; return <article className="workset-row" key={workset.id}><div className="workset-head"><div><strong>{workset.name}</strong><span className={`activity-label ${workset.active ? "active" : ""}`}>{workset.active ? "Activo" : "Esperando"}</span></div><div className="row-actions"><button className="text-link" onClick={() => setEditing(isEditing ? null : workset.id)}>{isEditing ? "Listo" : "Editar"}</button><button className="text-link danger-link" onClick={() => void onDelete(workset.id)}>Eliminar</button></div></div><div className="workset-members">{memberApps.length === 0 ? <span>Sin aplicaciones</span> : memberApps.map((app) => <span className="member-chip" key={app.applicationId}><AppIcon app={app} size={22} />{app.applicationName}</span>)}</div>{isEditing && <div className="workset-edit-grid"><label><span>Nombre</span><input defaultValue={workset.name} onBlur={(event) => { if (event.target.value.trim() && event.target.value.trim() !== workset.name) void onRename(workset.id, event.target.value); }} /></label><div className="member-picker">{tracked.map((app) => <label key={app.applicationId} className="member-option"><input type="checkbox" defaultChecked={workset.applicationIds.includes(app.applicationId)} onChange={(event) => { const next = new Set(workset.applicationIds); if (event.target.checked) next.add(app.applicationId); else next.delete(app.applicationId); void onMembers(workset.id, [...next]); }} /><AppIcon app={app} size={26} /><span>{app.applicationName}</span></label>)}</div></div>}</article>; })}</div></section>;
+}
+
+function HistorySection({ history, worksets }: { history: CheckpointRecord[]; worksets: WorksetView[] }) {
+  const worksetNames = useMemo(() => new Map(worksets.map((item) => [item.id, item.name])), [worksets]);
+  return <section className="main-section"><div className="section-title-row"><div><h1>Historial</h1><p>Checkpoints guardados en este equipo.</p></div></div><div className="history-list">{history.length === 0 && <div className="empty-line"><strong>Todavía no hay checkpoints.</strong><span>Van a aparecer acá después de guardarlos.</span></div>}{history.map((item) => <article className="history-entry" key={item.id}><div className="history-top"><div><strong>{item.worksetId ? worksetNames.get(item.worksetId) ?? "Entorno" : item.applicationName}</strong><span>{item.contextLabel}</span></div><div className="history-status"><time>{formatTime(item.createdAtMs)}</time><span className={item.resolvedAtMs ? "resolved" : "pending"}>{item.resolvedAtMs ? "Retomado" : "Pendiente"}</span></div></div>{item.text && <p>{item.text}</p>}<AudioPlayback checkpoint={item} />{item.transcript && <div className="transcript"><span>Transcripción</span><p>{item.transcript}</p></div>}</article>)}</div></section>;
+}
+
+function SettingsSection({ settings, onStartup, onPause }: { settings: SettingsView; onStartup: (enabled: boolean) => Promise<void>; onPause: (paused: boolean) => Promise<void> }) {
+  return <section className="main-section settings-section"><div className="section-title-row"><div><h1>Ajustes</h1><p>Preferencias esenciales de SelfRelay.</p></div></div><div className="settings-list"><label className="setting-row"><div><strong>Iniciar SelfRelay con Windows</strong><span>Se inicia en segundo plano y queda disponible desde el tray.</span></div><input className="switch" type="checkbox" checked={settings.launchAtStartup} onChange={(event) => void onStartup(event.target.checked)} /></label><label className="setting-row"><div><strong>Seguimiento</strong><span>Pausar no borra checkpoints ni aplicaciones seleccionadas.</span></div><input className="switch" type="checkbox" checked={settings.trackingActive} onChange={(event) => void onPause(!event.target.checked)} /></label><div className="setting-row static"><div><strong>Privacidad</strong><span>Aplicaciones, checkpoints, audio y transcripciones permanecen locales. No hay cuenta ni backend.</span></div><span className="local-pill">Solo local</span></div><div className="setting-row static"><div><strong>Datos locales</strong><span className="path-text">{settings.dataDirectory}</span></div></div></div><div className="about-line"><Brand compact /><span>SelfRelay {settings.version}</span></div></section>;
+}
+
+function MainProduct() {
+  const [discovered, setDiscovered] = useState<DiscoveredApplication[]>([]);
+  const [tracked, setTracked] = useState<TrackedApplication[]>([]);
+  const [worksets, setWorksets] = useState<WorksetView[]>([]);
+  const [history, setHistory] = useState<CheckpointRecord[]>([]);
+  const [settings, setSettings] = useState<SettingsView | null>(null);
+  const [onboarding, setOnboarding] = useState<boolean | null>(null);
+  const [section, setSection] = useState<MainSection>("apps");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = useCallback(async () => { try { const [apps, selected, sets, checkpoints, nextSettings, completed] = await Promise.all([invoke<DiscoveredApplication[]>("get_discovered_applications"), invoke<TrackedApplication[]>("get_tracked_applications"), invoke<WorksetView[]>("get_worksets"), invoke<CheckpointRecord[]>("get_checkpoint_history"), invoke<SettingsView>("get_settings"), invoke<boolean>("get_onboarding_completed")]); setDiscovered(apps); setTracked(selected); setWorksets(sets); setHistory(checkpoints); setSettings(nextSettings); setOnboarding(completed); setError(null); } catch (cause) { setError(String(cause)); } }, []);
+  useEffect(() => { void refresh(); const unlisten = listen("desktop://state-changed", () => void refresh()); return () => { void unlisten.then((stop) => stop()); }; }, [refresh]);
+  const run = async (operation: () => Promise<unknown>) => { setBusy(true); try { await operation(); await refresh(); setError(null); } catch (cause) { setError(String(cause)); } finally { setBusy(false); } };
+  const pickApplication = async () => invoke<TrackedApplication | null>("pick_application_executable");
+  const pickAndAdd = async () => { const picked = await pickApplication(); if (picked) await run(() => invoke("set_application_tracking", { application: picked, enabled: true })); };
+  if (onboarding === null || !settings) return <main className="boot-page"><Brand /><span>Preparando tu entorno…</span></main>;
+  if (!onboarding) return <Onboarding discovered={discovered} initialTracked={tracked} busy={busy} onPick={pickApplication} onComplete={async (apps) => run(() => invoke("complete_onboarding", { applications: apps }))} />;
+  return <main className="app-shell"><header className="app-header"><Brand /><nav className="nav-tabs" aria-label="SelfRelay">{(["apps", "worksets", "history", "settings"] as MainSection[]).map((item) => { const label = item === "apps" ? "Aplicaciones" : item === "worksets" ? "Entornos" : item === "history" ? "Historial" : "Ajustes"; return <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{label}</button>; })}</nav><span className={`tracking-pill ${settings.trackingActive ? "active" : "paused"}`}><span />{settings.trackingActive ? "Activo" : "Pausado"}</span></header>{section === "apps" && <ApplicationsSection discovered={discovered} tracked={tracked} busy={busy} onAdd={async (app) => run(() => invoke("set_application_tracking", { application: app, enabled: true }))} onRemove={async (app) => run(() => invoke("set_application_tracking", { application: app, enabled: false }))} onPick={pickAndAdd} onManualCheckpoint={async () => run(() => invoke("save_checkpoint_now"))} />}{section === "worksets" && <WorksetsSection worksets={worksets} tracked={tracked} onCreate={async (name, ids) => run(() => invoke("create_workset", { name, applicationIds: ids }))} onRename={async (id, name) => run(() => invoke("rename_workset", { id, name }))} onMembers={async (id, ids) => run(() => invoke("set_workset_applications", { id, applicationIds: ids }))} onDelete={async (id) => run(() => invoke("delete_workset", { id }))} />}{section === "history" && <HistorySection history={history} worksets={worksets} />}{section === "settings" && <SettingsSection settings={settings} onStartup={async (enabled) => run(() => invoke("set_launch_at_startup", { enabled }))} onPause={async (paused) => run(() => invoke("set_tracking_paused", { paused }))} />}{error && <div className="global-notice"><Notice error>{error}</Notice></div>}</main>;
+}
+
+function CaptureSurface({ qaCapture }: { qaCapture?: CaptureView }) {
+  const [capture, setCapture] = useState<CaptureView | null>(qaCapture ?? null);
+  const [text, setText] = useState("");
+  const [target, setTarget] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [audioBytes, setAudioBytes] = useState<Uint8Array | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const stopPromiseRef = useRef<Promise<Uint8Array> | null>(null);
+  const refresh = useCallback(async () => { if (qaCapture) return; try { setCapture(await invoke<CaptureView | null>("get_pending_capture")); } catch (cause) { setError(String(cause)); } }, [qaCapture]);
+  useEffect(() => { void refresh(); if (qaCapture) return; const unlisten = listen("desktop://state-changed", () => void refresh()); return () => { void unlisten.then((stop) => stop()); }; }, [qaCapture, refresh]);
+  useEffect(() => () => { streamRef.current?.getTracks().forEach((track) => track.stop()); if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+  const clearAudioUrl = () => { if (audioUrl) URL.revokeObjectURL(audioUrl); setAudioUrl(null); };
+  const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const recorder = new MediaRecorder(stream); streamRef.current = stream; recorderRef.current = recorder; chunksRef.current = []; setAudioBytes(null); clearAudioUrl(); recorder.ondataavailable = (event) => { if (event.data.size > 0) chunksRef.current.push(event.data); }; recorder.start(); setRecording(true); setError(null); } catch { setError("SelfRelay no pudo usar el micrófono. Podés seguir guardando el checkpoint con texto."); } };
+  const stopRecording = async () => { if (stopPromiseRef.current) return stopPromiseRef.current; const recorder = recorderRef.current; if (!recorder || recorder.state === "inactive") return audioBytes ?? new Uint8Array(); const promise = new Promise<Uint8Array>((resolve, reject) => { recorder.addEventListener("stop", async () => { try { const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }); const wav = await mediaBlobToWav(blob); setAudioBytes(wav); clearAudioUrl(); setAudioUrl(URL.createObjectURL(new Blob([wav], { type: "audio/wav" }))); resolve(wav); } catch (cause) { reject(cause); } finally { streamRef.current?.getTracks().forEach((track) => track.stop()); streamRef.current = null; recorderRef.current = null; stopPromiseRef.current = null; setRecording(false); } }, { once: true }); recorder.stop(); }); stopPromiseRef.current = promise; return promise; };
+  const save = async () => { if (qaCapture) return; setBusy(true); try { let finalAudio = audioBytes; if (recording) finalAudio = await stopRecording(); await invoke("save_checkpoint", { text, worksetId: target || null, audioBytes: finalAudio?.length ? Array.from(finalAudio) : null }); setText(""); setAudioBytes(null); clearAudioUrl(); setTarget(""); await refresh(); setError(null); } catch (cause) { setError(String(cause)); } finally { setBusy(false); } };
+  const discard = async () => { if (recording) { try { await stopRecording(); } catch { /* discard regardless */ } } if (!qaCapture) await invoke("dismiss_capture"); };
+  if (!capture) return <main className="surface-shell"><Brand compact /><p className="surface-muted">No hay un checkpoint pendiente.</p></main>;
+  return <main className="surface-shell capture-surface"><Brand compact /><div className="surface-heading"><div className="capture-app"><AppIcon app={{ applicationId: capture.applicationId, applicationName: capture.applicationName }} size={34} /><span>{capture.applicationName}</span></div><h1>¿Dónde quedaste?</h1>{capture.contextLabel !== capture.applicationName && <p>{capture.contextLabel}</p>}</div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="Dejá lo mínimo que necesitás para retomar después…" autoFocus /><div className="voice-box">{!recording && !audioBytes && <button className="button button-secondary mic-button" onClick={() => void startRecording()}><span aria-hidden="true">●</span> Grabar nota de voz</button>}{recording && <div className="recording-row"><span className="recording-dot" /><strong>Grabando…</strong><button className="text-link" onClick={() => void stopRecording()}>Detener</button></div>}{!recording && audioBytes && <div className="audio-preview"><audio controls src={audioUrl ?? undefined} /><button className="text-link" onClick={() => { setAudioBytes(null); clearAudioUrl(); }}>Descartar audio</button></div>}</div>{capture.worksets.length > 0 && <fieldset className="target-choice"><legend>Guardar para</legend><label><input type="radio" checked={!target} onChange={() => setTarget("")} /> Esta aplicación</label>{capture.worksets.map((workset) => <label key={workset.id}><input type="radio" checked={target === workset.id} onChange={() => setTarget(workset.id)} /> {workset.name}</label>)}</fieldset>}{error && <Notice error>{error}</Notice>}<div className="surface-actions"><button className="button button-secondary" disabled={busy} onClick={() => void discard()}>No guardar</button><button className="button button-primary" disabled={busy} onClick={() => void save()}>{recording ? "Guardar y detener" : "Guardar checkpoint"}</button></div></main>;
+}
+
+function RecoveryCheckpoint({ item, onResolve, qa = false }: { item: CheckpointRecord; onResolve: (id: number) => Promise<void>; qa?: boolean }) {
+  const [transcript, setTranscript] = useState(item.transcript ?? null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const transcribe = async () => { if (qa) { setTranscript("Revisar la introducción y cerrar con el ejemplo final."); return; } setTranscribing(true); try { setTranscript(await invoke<string>("transcribe_checkpoint", { id: item.id })); setError(null); } catch (cause) { setError(String(cause)); } finally { setTranscribing(false); } };
+  return <article className="recovery-item"><time>{formatTime(item.createdAtMs)}</time>{item.text && <p className="recovery-note">“{item.text}”</p>}<AudioPlayback checkpoint={item} />{item.audioPath && !transcript && <button className="text-link transcribe-link" disabled={transcribing} onClick={() => void transcribe()}>{transcribing ? "Transcribiendo localmente…" : "Transcribir audio"}</button>}{transcript && <div className="transcript"><span>Transcripción</span><p>{transcript}</p></div>}{error && <div className="retry-line"><span>{error}</span><button className="text-link" onClick={() => void transcribe()}>Reintentar</button></div>}<button className="button button-secondary resolved-button" onClick={() => void onResolve(item.id)}>Ya retomé</button></article>;
+}
+
+function RecoverySurface({ qaRecovery }: { qaRecovery?: RecoveryView }) {
+  const [recovery, setRecovery] = useState<RecoveryView | null>(qaRecovery ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = useCallback(async () => { if (qaRecovery) return; try { setRecovery(await invoke<RecoveryView | null>("get_active_recovery")); } catch (cause) { setError(String(cause)); } }, [qaRecovery]);
+  useEffect(() => { void refresh(); if (qaRecovery) return; const unlisten = listen("desktop://state-changed", () => void refresh()); return () => { void unlisten.then((stop) => stop()); }; }, [qaRecovery, refresh]);
+  const resolve = async (id: number) => { if (qaRecovery) { setRecovery((current) => current ? { ...current, checkpoints: current.checkpoints.filter((item) => item.id !== id) } : null); return; } await invoke("resolve_checkpoint", { id }); await refresh(); };
+  const defer = async () => { if (!qaRecovery) await invoke("defer_recovery"); };
+  if (!recovery) return <main className="surface-shell"><Brand compact /><p className="surface-muted">No hay nada pendiente para retomar.</p></main>;
+  return <main className="surface-shell recovery-surface"><Brand compact /><div className="surface-heading"><p className="return-label">Volviste a</p><h1>{recovery.targetName}</h1>{recovery.targetKind === "context" && recovery.contextLabel !== recovery.applicationName && <p>{recovery.contextLabel}</p>}</div><div className="recovery-list">{recovery.checkpoints.map((item) => <RecoveryCheckpoint key={item.id} item={item} onResolve={resolve} qa={Boolean(qaRecovery)} />)}</div>{error && <Notice error>{error}</Notice>}<div className="recovery-footer"><button className="button button-secondary" onClick={() => void defer()}>Lo veo después</button></div></main>;
+}
+
+const qaApps: DiscoveredApplication[] = [
+  { applicationId: "app:notepad.exe", applicationName: "Notepad", executablePath: null, running: true, foreground: true },
+  { applicationId: "app:mspaint.exe", applicationName: "Paint", executablePath: null, running: false, foreground: false },
+  { applicationId: "app:winword.exe", applicationName: "Microsoft Word", executablePath: null, running: false, foreground: false },
+  { applicationId: "app:excel.exe", applicationName: "Microsoft Excel", executablePath: null, running: false, foreground: false },
+  { applicationId: "app:spotify.exe", applicationName: "Spotify", executablePath: null, running: true, foreground: false },
+  { applicationId: "app:discord.exe", applicationName: "Discord", executablePath: null, running: false, foreground: false },
+];
+const qaTracked = qaApps.slice(0, 3).map(applicationToTracked);
+const qaWorksets: WorksetView[] = [{ id: "ws:coder", name: "Proyecto CoderCup", applicationIds: [qaApps[0]!.applicationId, qaApps[1]!.applicationId, qaApps[2]!.applicationId], active: true }];
+const qaHistory: CheckpointRecord[] = [
+  { id: 1, applicationId: "app:notepad.exe", applicationName: "Notepad", contextId: "app:notepad.exe", contextLabel: "Notepad", text: "Terminar la introducción y revisar la última frase.", createdAtMs: Date.now() - 86_400_000, resolvedAtMs: null },
+  { id: 2, applicationId: "app:winword.exe", applicationName: "Microsoft Word", contextId: "word:demo.docx", contextLabel: "Propuesta.docx", worksetId: "ws:coder", text: "Validar la sección de impacto antes de enviar.", audioPath: "qa.wav", transcript: "Validar impacto y revisar la cifra final.", createdAtMs: Date.now() - 3_600_000, resolvedAtMs: Date.now() - 1_800_000 },
+];
+
+function QaPreview({ state }: { state: string }) {
+  if (state === "onboarding") return <Onboarding discovered={qaApps} initialTracked={[]} busy={false} onPick={async () => null} onComplete={async () => undefined} />;
+  if (state === "capture") return <CaptureSurface qaCapture={{ applicationId: "app:notepad.exe", applicationName: "Notepad", contextId: "app:notepad.exe", contextLabel: "Notepad", worksets: [{ id: "ws:coder", name: "Proyecto CoderCup" }] }} />;
+  if (state === "recovery") return <RecoverySurface qaRecovery={{ targetKind: "context", targetName: "Notepad", applicationId: "app:notepad.exe", applicationName: "Notepad", contextId: "app:notepad.exe", contextLabel: "Notepad", checkpoints: [{ ...qaHistory[0]! }, { ...qaHistory[1]!, id: 3, applicationId: "app:notepad.exe", applicationName: "Notepad", contextId: "app:notepad.exe", contextLabel: "Notepad", worksetId: null, resolvedAtMs: null }] }} />;
+  const section: MainSection = state === "worksets" ? "worksets" : state === "history" ? "history" : state === "settings" ? "settings" : "apps";
+  return <main className="app-shell"><header className="app-header"><Brand /><nav className="nav-tabs"><button className={section === "apps" ? "active" : ""}>Aplicaciones</button><button className={section === "worksets" ? "active" : ""}>Entornos</button><button className={section === "history" ? "active" : ""}>Historial</button><button className={section === "settings" ? "active" : ""}>Ajustes</button></nav><span className="tracking-pill active"><span />Activo</span></header>{section === "apps" && <ApplicationsSection discovered={qaApps} tracked={qaTracked} busy={false} onAdd={async () => undefined} onRemove={async () => undefined} onPick={async () => undefined} onManualCheckpoint={async () => undefined} />}{section === "worksets" && <WorksetsSection worksets={qaWorksets} tracked={qaTracked} onCreate={async () => undefined} onRename={async () => undefined} onMembers={async () => undefined} onDelete={async () => undefined} />}{section === "history" && <HistorySection history={qaHistory} worksets={qaWorksets} />}{section === "settings" && <SettingsSection settings={{ launchAtStartup: true, trackingActive: true, version: PRODUCT_VERSION, dataDirectory: "C:\\Users\\Demo\\AppData\\Local\\com.veltira.selfrelay" }} onStartup={async () => undefined} onPause={async () => undefined} />}</main>;
 }
 
 export default function App() {
-  const [discovered, setDiscovered] = useState<DiscoveredApplication[]>([]);
-  const [tracked, setTracked] = useState<TrackedApplication[]>([]);
-  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
-  const [status, setStatus] = useState<TrackingStatus>({ active: true, observer: "win32" });
-  const [capture, setCapture] = useState<ContextSnapshot | null>(null);
-  const [recovery, setRecovery] = useState<RecoveryView | null>(null);
-  const [history, setHistory] = useState<CheckpointRecord[]>([]);
-  const [selected, setSelected] = useState<Map<string, TrackedApplication>>(new Map());
-  const [checkpointText, setCheckpointText] = useState("");
-  const [section, setSection] = useState<"apps" | "history">("apps");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const onboardingSelectionInitialized = useRef(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      const [nextDiscovered, nextTracked, nextOnboarding, nextStatus, nextCapture, nextRecovery, nextHistory] = await Promise.all([
-        invoke<DiscoveredApplication[]>("get_discovered_applications"),
-        invoke<TrackedApplication[]>("get_tracked_applications"),
-        invoke<boolean>("get_onboarding_completed"),
-        invoke<TrackingStatus>("get_tracking_status"),
-        invoke<ContextSnapshot | null>("get_pending_capture"),
-        invoke<RecoveryView | null>("get_active_recovery"),
-        invoke<CheckpointRecord[]>("get_checkpoint_history"),
-      ]);
-      setDiscovered(nextDiscovered);
-      setTracked(nextTracked);
-      setOnboardingCompleted(nextOnboarding);
-      setStatus(nextStatus);
-      setCapture(nextCapture);
-      setRecovery(nextRecovery);
-      setHistory(nextHistory);
-      if (!nextOnboarding && !onboardingSelectionInitialized.current) {
-        onboardingSelectionInitialized.current = true;
-        setSelected(new Map(nextTracked.map((application) => [application.applicationId, application])));
-      }
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const unlisteners = Promise.all([
-      listen("desktop://windows-changed", () => void refresh()),
-      listen("desktop://tracking-changed", () => void refresh()),
-      listen("desktop://tracking-rules-changed", () => void refresh()),
-      listen("desktop://checkpoint-changed", () => void refresh()),
-    ]);
-    return () => {
-      void unlisteners.then((items) => items.forEach((unlisten) => unlisten()));
-    };
-  }, [refresh]);
-
-  const trackedIds = useMemo(() => new Set(tracked.map((application) => application.applicationId)), [tracked]);
-  const availableNow = useMemo(
-    () => discovered.filter((application) => !trackedIds.has(application.applicationId)).sort(byApplicationName),
-    [discovered, trackedIds],
-  );
-  const onboardingSelected = useMemo(() => [...selected.values()].sort(byApplicationName), [selected]);
-  const onboardingAvailable = useMemo(
-    () => discovered.filter((application) => !selected.has(application.applicationId)).sort(byApplicationName),
-    [discovered, selected],
-  );
-  const runningIds = useMemo(() => new Set(discovered.map((application) => application.applicationId)), [discovered]);
-
-  const chooseExecutable = async (persistImmediately: boolean) => {
-    setBusy(true);
-    try {
-      const picked = await invoke<TrackedApplication | null>("pick_application_executable");
-      if (!picked) return;
-      if (persistImmediately) {
-        await invoke("set_application_tracking", { application: picked, enabled: true });
-        await refresh();
-      } else {
-        setSelected((current) => new Map(current).set(picked.applicationId, picked));
-      }
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addTracked = async (application: TrackedApplication) => {
-    setBusy(true);
-    try {
-      await invoke("set_application_tracking", { application, enabled: true });
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removeTracked = async (application: TrackedApplication) => {
-    setBusy(true);
-    try {
-      await invoke("set_application_tracking", { application, enabled: false });
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const finishOnboarding = async () => {
-    setBusy(true);
-    try {
-      await invoke("complete_onboarding", { applications: onboardingSelected });
-      setOnboardingCompleted(true);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const togglePaused = async () => {
-    setBusy(true);
-    try {
-      await invoke("set_tracking_paused", { paused: status.active });
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveCapture = async () => {
-    if (!checkpointText.trim()) return;
-    setBusy(true);
-    try {
-      await invoke("save_checkpoint", { text: checkpointText });
-      setCheckpointText("");
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (onboardingCompleted === null) {
-    return <main className="shell loading-shell"><img src={logoUrl} alt="" className="loading-logo" /></main>;
-  }
-
-  if (!onboardingCompleted) {
-    return (
-      <main className="shell onboarding-shell">
-        <section className="onboarding-card">
-          <div className="onboarding-brand"><img src={logoUrl} alt="" /><span>SelfRelay</span><small>v{DESKTOP_VERSION}</small></div>
-          <p className="eyebrow">Configuración inicial</p>
-          <h1>Elegí qué aplicaciones querés seguir.</h1>
-          <p className="lead">SelfRelay empieza con cero aplicaciones en seguimiento. Solo lo que añadas explícitamente podrá generar checkpoints.</p>
-
-          <div className="management-group">
-            <div className="group-heading"><strong>En seguimiento al continuar</strong><span>{onboardingSelected.length}</span></div>
-            {onboardingSelected.length === 0 ? (
-              <div className="empty-state compact"><strong>Ninguna aplicación seleccionada.</strong><span>Podés continuar así y SelfRelay no seguirá nada.</span></div>
-            ) : (
-              <div className="app-list">{onboardingSelected.map((application) => (
-                <article className="app-row" key={application.applicationId}>
-                  <span className="app-icon">{appInitial(application.applicationName)}</span>
-                  <div className="app-copy"><strong>{application.applicationName}</strong><small>En seguimiento</small></div>
-                  <button className="button secondary row-action" disabled={busy} onClick={() => setSelected((current) => {
-                    const next = new Map(current);
-                    next.delete(application.applicationId);
-                    return next;
-                  })}>Quitar</button>
-                </article>
-              ))}</div>
-            )}
-          </div>
-
-          <div className="management-group">
-            <div className="group-heading"><strong>Disponibles ahora</strong><span>{onboardingAvailable.length}</span></div>
-            {onboardingAvailable.length === 0 ? (
-              <div className="empty-state compact"><strong>No hay otras aplicaciones elegibles abiertas.</strong><span>Abrí Notepad, Paint u otra app para verla acá, o elegí un ejecutable.</span></div>
-            ) : (
-              <div className="app-list">{onboardingAvailable.map((application) => (
-                <article className="app-row" key={application.applicationId}>
-                  <span className="app-icon">{appInitial(application.applicationName)}</span>
-                  <div className="app-copy"><strong>{application.applicationName}</strong><small>Abierta ahora · no seguida</small></div>
-                  <button className="button primary row-action" disabled={busy} onClick={() => setSelected((current) => new Map(current).set(application.applicationId, application))}>Añadir</button>
-                </article>
-              ))}</div>
-            )}
-          </div>
-
-          <div className="onboarding-actions">
-            <button className="button secondary" disabled={busy} onClick={() => void chooseExecutable(false)}>Elegir otra aplicación</button>
-            <button className="button primary" disabled={busy} onClick={() => void finishOnboarding()}>Continuar</button>
-          </div>
-          <p className="privacy-note">Todo queda local. SelfRelay usa metadata mínima de ventanas para reconocer las aplicaciones que elegiste; no lee documentos, no registra teclas y no sube datos.</p>
-          {error && <div className="notice notice-error">{error}</div>}
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand"><img src={logoUrl} alt="" className="brand-logo" /><span>SelfRelay</span><small>v{DESKTOP_VERSION}</small></div>
-        <div className="top-actions">
-          <button className="text-button" onClick={() => setSection(section === "apps" ? "history" : "apps")}>{section === "apps" ? "Historial" : "Aplicaciones"}</button>
-          <button className={`status ${status.active ? "status-active" : "status-paused"}`} disabled={busy} onClick={() => void togglePaused()}>
-            <span className="status-dot" />{status.active ? "Activo" : "Pausado"}
-          </button>
-        </div>
-      </header>
-
-      <section className="content">
-        {section === "apps" ? (
-          <>
-            <div className="section-heading">
-              <div><p className="eyebrow">Tu entorno</p><h1>Aplicaciones</h1><p className="section-description">Añadí o quitá aplicaciones en cualquier momento. Solo las marcadas como “En seguimiento” pueden generar checkpoints.</p></div>
-            </div>
-
-            <div className="management-group">
-              <div className="group-heading"><strong>En seguimiento</strong><span>{tracked.length}</span></div>
-              {tracked.length === 0 ? (
-                <div className="empty-state"><strong>No seguís ninguna aplicación.</strong><span>No se crearán checkpoints hasta que añadas una aplicación de forma explícita.</span></div>
-              ) : (
-                <div className="app-list">
-                  {tracked.map((application) => (
-                    <article className="app-row" key={application.applicationId}>
-                      <span className="app-icon">{appInitial(application.applicationName)}</span>
-                      <div className="app-copy"><strong>{application.applicationName}</strong><small>{runningIds.has(application.applicationId) ? "En seguimiento · abierta ahora" : "En seguimiento · esperando"}</small></div>
-                      <span className="tracked-badge">En seguimiento</span>
-                      <button className="button secondary row-action" disabled={busy} onClick={() => void removeTracked(application)}>Quitar</button>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="management-group">
-              <div className="group-heading"><strong>Disponibles ahora</strong><span>{availableNow.length}</span></div>
-              {availableNow.length === 0 ? (
-                <div className="empty-state compact"><strong>No hay aplicaciones nuevas disponibles.</strong><span>Abrí una aplicación de escritorio elegible y aparecerá acá automáticamente.</span></div>
-              ) : (
-                <div className="app-list">
-                  {availableNow.map((application) => (
-                    <article className="app-row" key={application.applicationId}>
-                      <span className="app-icon">{appInitial(application.applicationName)}</span>
-                      <div className="app-copy"><strong>{application.applicationName}</strong><small>Abierta ahora · no seguida</small></div>
-                      <button className="button primary row-action" disabled={busy} onClick={() => void addTracked(application)}>Añadir</button>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="manual-add-row">
-              <div><strong>¿No aparece la aplicación?</strong><span>Elegí su archivo .exe como alternativa.</span></div>
-              <button className="button secondary" disabled={busy} onClick={() => void chooseExecutable(true)}>Elegir otra aplicación</button>
-            </div>
-            <p className="privacy-line">La lista pública agrupa aplicaciones, no ventanas técnicas. HWND, PID y metadata interna del observer no se muestran ni se usan como identidad durable.</p>
-          </>
-        ) : (
-          <>
-            <div className="section-heading"><div><p className="eyebrow">Local</p><h1>Historial</h1><p className="section-description">Tus checkpoints guardados; los resueltos no vuelven a aparecer automáticamente.</p></div></div>
-            {history.length === 0 ? <div className="empty-state"><strong>Todavía no hay checkpoints.</strong><span>Van a aparecer acá después de guardarlos.</span></div> : (
-              <div className="history-list">{history.map((item) => (
-                <article className="history-row" key={item.id}>
-                  <div className="history-meta"><strong>{item.applicationName}</strong><span>{item.contextLabel}</span><time>{formatCheckpointTime(item.createdAtMs)}</time></div>
-                  <p>{item.text}</p>
-                  <span className={`history-state ${item.resolvedAtMs ? "resolved" : "pending"}`}>{item.resolvedAtMs ? "Retomado" : "Pendiente"}</span>
-                </article>
-              ))}</div>
-            )}
-          </>
-        )}
-        {error && <div className="notice notice-error global-error">{error}</div>}
-      </section>
-
-      {capture && (
-        <div className="modal-backdrop">
-          <section className="checkpoint-modal" role="dialog" aria-modal="true" aria-labelledby="capture-title">
-            <div className="modal-brand"><img src={logoUrl} alt="" /><span>SelfRelay</span></div>
-            <p className="eyebrow">{capture.applicationName}</p>
-            <h2 id="capture-title">¿Dónde quedaste?</h2>
-            <p className="context-line">{capture.contextLabel}</p>
-            <textarea autoFocus value={checkpointText} onChange={(event) => setCheckpointText(event.target.value)} placeholder="Dejá lo mínimo que necesitás para retomar después…" />
-            <div className="modal-actions">
-              <button className="button secondary" disabled={busy} onClick={() => void invoke("dismiss_capture").then(() => refresh())}>No guardar</button>
-              <button className="button primary" disabled={busy || !checkpointText.trim()} onClick={() => void saveCapture()}>Guardar checkpoint</button>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {!capture && recovery && (
-        <div className="modal-backdrop">
-          <section className="checkpoint-modal recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-            <div className="modal-brand"><img src={logoUrl} alt="" /><span>SelfRelay</span></div>
-            <p className="eyebrow">Recuperación</p>
-            <h2 id="recovery-title">Volviste a {recovery.applicationName}</h2>
-            <p className="context-line">{recovery.contextLabel}</p>
-            <div className="pending-list">
-              {recovery.checkpoints.map((item) => (
-                <article className="pending-checkpoint" key={item.id}>
-                  <div><time>{formatCheckpointTime(item.createdAtMs)}</time><p>{item.text}</p></div>
-                  <button className="button secondary resolve-button" disabled={busy} onClick={() => void invoke("resolve_checkpoint", { id: item.id }).then(() => refresh())}>Ya retomé</button>
-                </article>
-              ))}
-            </div>
-            <div className="modal-actions single"><button className="button secondary" disabled={busy} onClick={() => void invoke("defer_recovery").then(() => refresh())}>Lo veo después</button></div>
-          </section>
-        </div>
-      )}
-    </main>
-  );
+  const params = new URLSearchParams(window.location.search);
+  const qa = params.get("qa");
+  const surface = params.get("surface");
+  if (qa) return <QaPreview state={qa} />;
+  if (surface === "capture") return <CaptureSurface />;
+  if (surface === "recovery") return <RecoverySurface />;
+  return <MainProduct />;
 }
