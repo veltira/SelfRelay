@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Guardar checkpoint · SelfRelay</title>
   <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="product-polish.css">
 </head>
 <body class="capture">
   <main class="capture-shell">
     <header class="app-header capture-header">
-      <div class="identity"><img class="logo" src="icons/selfrelay-logo.png" alt=""><span>SelfRelay</span></div>
+      <div class="identity"><img class="logo" src="icons/icon32.png" alt=""><span>SelfRelay</span></div>
     </header>
 
     <div class="capture-body">
@@ -18,14 +19,16 @@
         <p id="meta" class="context-meta"></p>
       </section>
 
-      <section id="composer" class="composer">
-        <label class="sr-only" for="text">Contexto para retomar</label>
-        <textarea id="text" maxlength="12000" rows="5" placeholder="Dejá la pista que necesitás para continuar después…"></textarea>
-        <div class="composer-toolbar">
-          <button id="record" class="tool-action" type="button" aria-label="Grabar audio" title="Grabar audio">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.25a3.75 3.75 0 0 0 3.75-3.75v-5a3.75 3.75 0 0 0-7.5 0v5A3.75 3.75 0 0 0 12 15.25Z"/><path d="M5.75 11.25v.25a6.25 6.25 0 0 0 12.5 0v-.25M12 17.75v3M9.25 20.75h5.5"/></svg>
-            <span>Grabar audio</span>
-          </button>
+      <section id="composer" class="composer-block">
+        <label class="composer-label" for="text">Escribí una nota</label>
+        <div class="composer">
+          <textarea id="text" maxlength="12000" rows="5" placeholder="Anotá qué estabas haciendo o cuál es el próximo paso…"></textarea>
+          <div class="composer-toolbar voice-action-row">
+            <button id="record" class="voice-action" type="button" aria-label="Grabar nota de voz" title="Grabar nota de voz">
+              <span class="voice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.25a3.75 3.75 0 0 0 3.75-3.75v-5a3.75 3.75 0 0 0-7.5 0v5A3.75 3.75 0 0 0 12 15.25Z"/><path d="M5.75 11.25v.25a6.25 6.25 0 0 0 12.5 0v-.25M12 17.75v3M9.25 20.75h5.5"/></svg></span>
+              <span>Grabar nota de voz</span>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -42,7 +45,7 @@
 
       <section id="audioReview" class="audio-review" hidden>
         <div class="review-topline">
-          <div><strong>Audio listo</strong><span id="audioDuration" class="helper inline-helper"></span></div>
+          <div><strong>Nota de voz</strong><span id="audioDuration" class="helper inline-helper"></span></div>
           <button id="redoRecording" class="text-button" type="button">Volver a grabar</button>
         </div>
         <audio id="preview" controls preload="metadata"></audio>

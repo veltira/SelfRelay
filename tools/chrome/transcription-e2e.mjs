@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+import {readFile,rm} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {createServer} from 'node:http';
+import {chromium} from 'playwright';
+
+const extensionDir=resolve(process.argv[2]||'apps/extension/dist');
+const fixturePath=resolve(process.argv[3]||'');
+if(!fixturePath)throw new Error('usage: transcription-e2e.mjs <extension-dir> <wav-fixture>');
+const fixtureBase64=(await readFile(fixturePath)).toString('base64');
+const screenshotsDir=resolve(process.env.SELFRELAY_SCREENSHOTS_DIR||'artifacts/chrome-e2e-screenshots');
+await rm(screenshotsDir,{recursive:true,force:true});
+
+const server=createServer((_,response)=>{response.writeHead(200,{'content-type':'text/html; charset=utf-8'});response.end('<!doctype html><title>SelfRelay E2E work page</title><main>Supported work page</main>');});
+await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+const address=server.address();if(!address||typeof address==='string')throw new Error('fixture_server_failed');
+const supportedUrl=`http://127.0.0.1:${address.port}/work`;
+
+const context=await chromium.launchPersistentContext('',{channel:'chromium',headless:true,args:[`--disable-extensions-except=${extensionDir}`,`--load-extension=${extensionDir}`,'--autoplay-policy=no-user-gesture-required']});
+const consoleErrors=[];const pageErrors=[];const failedRequests=[];
+function capturePageDiagnostics(page){page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});page.on('pageerror',error=>pageErrors.push(error?.stack||error?.message||String(error)));page.on('requestfailed',request=>failedRequests.push(`${request.url()} :: ${request.failure()?.errorText||'failed'}`));}
+context.on('page',capturePageDiagnostics);for(const existing of context.pages())capturePageDiagnostics(existing);
+
+try{
+  let [serviceWorker]=context.serviceWorkers();if(!serviceWorker)serviceWorker=await context.waitForEvent('serviceworker',{timeout:30000});
+  const extensionId=new URL(serviceWorker.url()).host;if(!serviceWorker.url().endsWith('/background.js'))throw new Error(`unexpected_service_worker:${serviceWorker.url()}`);
+
+  const workPage=await context.newPage();await workPage.goto(supportedUrl);await workPage.bringToFront();
+  const popupUrl=`chrome-extension://${extensionId}/popup.html`;await serviceWorker.evaluate(url=>chrome.tabs.create({url,active:false}),popupUrl);
+  let page=context.pages().find(item=>item.url()===popupUrl);if(!page)page=await context.waitForEvent('page',{predicate:item=>item.url()===popupUrl,timeout:10000});
+  await page.waitForLoadState('domcontentloaded');
+
+  const popupJsState=await page.evaluate(async()=>{const script=[...document.scripts].find(item=>item.getAttribute('src')==='popup.js');let fetchOk=false,status=0;try{const response=await fetch(chrome.runtime.getURL('popup.js'));status=response.status;fetchOk=response.ok;}catch{}return{scriptPresent:Boolean(script),scriptType:script?.type||'',fetchOk,status};});
+  let initialized=false;try{await page.waitForFunction(()=>{const toggle=document.querySelector('#simpleToggle'),empty=document.querySelector('#emptyActions');return toggle instanceof HTMLButtonElement&&typeof toggle.onclick==='function'&&empty instanceof HTMLElement&&empty.hidden===false;},null,{timeout:5000});initialized=true;}catch{}
+  const initState=await page.evaluate(()=>{const toggle=document.querySelector('#simpleToggle'),panel=document.querySelector('#simplePanel'),empty=document.querySelector('#emptyActions'),state=document.querySelector('#state');return{listenerType:toggle instanceof HTMLButtonElement?typeof toggle.onclick:'missing',expanded:toggle?.getAttribute('aria-expanded')??null,panelHidden:panel instanceof HTMLElement?panel.hidden:null,emptyHidden:empty instanceof HTMLElement?empty.hidden:null,stateText:state?.textContent?.trim()||'',readyState:document.readyState,activeElement:document.activeElement?.id||document.activeElement?.tagName||''};});
+  if(!initialized)throw new Error(`popup_not_initialized:${JSON.stringify({popupJsState,initState,consoleErrors,pageErrors,failedRequests})}`);
+
+  // Keep the supported work page active: an action popup does not replace the active tab.
+  // Drive the real popup DOM and its real compiled listener from the extension page itself.
+  const readDisclosure=()=>page.evaluate(()=>({expanded:document.querySelector('#simpleToggle')?.getAttribute('aria-expanded')??null,hidden:(document.querySelector('#simplePanel') instanceof HTMLElement)?document.querySelector('#simplePanel').hidden:null,listenerType:(document.querySelector('#simpleToggle') instanceof HTMLButtonElement)?typeof document.querySelector('#simpleToggle').onclick:'missing'}));
+  const disclosure={initial:await readDisclosure()};
+  const openClick=await page.evaluate(()=>{const button=document.querySelector('#simpleToggle');if(!(button instanceof HTMLButtonElement))throw new Error('disclosure_button_missing');button.click();return{expanded:button.getAttribute('aria-expanded'),hidden:(document.querySelector('#simplePanel') instanceof HTMLElement)?document.querySelector('#simplePanel').hidden:null};});
+  await page.waitForFunction(()=>document.querySelector('#simpleToggle')?.getAttribute('aria-expanded')==='true'&&document.querySelector('#simplePanel') instanceof HTMLElement&&!document.querySelector('#simplePanel').hidden);
+  disclosure.open=await readDisclosure();
+  const closeClick=await page.evaluate(()=>{const button=document.querySelector('#simpleToggle');if(!(button instanceof HTMLButtonElement))throw new Error('disclosure_button_missing');button.click();return{expanded:button.getAttribute('aria-expanded'),hidden:(document.querySelector('#simplePanel') instanceof HTMLElement)?document.querySelector('#simplePanel').hidden:null};});
+  await page.waitForFunction(()=>document.querySelector('#simpleToggle')?.getAttribute('aria-expanded')==='false'&&document.querySelector('#simplePanel') instanceof HTMLElement&&document.querySelector('#simplePanel').hidden);
+  disclosure.closed=await readDisclosure();
+
+  const result=await page.evaluate(async fixtureBase64=>{
+    if(!globalThis.chrome?.runtime?.getURL)throw new Error('selfrelay_extension_context_missing');
+    const isolation={crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer};
+    const logo=document.querySelector('.logo'),brand=document.querySelector('.identity span');let decodeOk=false;if(logo instanceof HTMLImageElement){try{await logo.decode();decodeOk=true;}catch{}}
+    const style=logo instanceof HTMLImageElement?getComputedStyle(logo):null,logoRect=logo instanceof HTMLImageElement?logo.getBoundingClientRect():null,brandRect=brand instanceof HTMLElement?brand.getBoundingClientRect():null;
+    const logoState={src:logo?.getAttribute('src')||'',complete:logo instanceof HTMLImageElement?logo.complete:false,naturalWidth:logo instanceof HTMLImageElement?logo.naturalWidth:0,naturalHeight:logo instanceof HTMLImageElement?logo.naturalHeight:0,decodeOk,visible:Boolean(style&&style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0&&logoRect&&logoRect.width>0&&logoRect.height>0),leftOfBrand:Boolean(logoRect&&brandRect&&logoRect.right<=brandRect.left+0.5),rect:logoRect?{left:logoRect.left,right:logoRect.right,width:logoRect.width,height:logoRect.height}:null,brandRect:brandRect?{left:brandRect.left,right:brandRect.right,width:brandRect.width,height:brandRect.height}:null};
+
+    const wavBytes=Uint8Array.from(atob(fixtureBase64),c=>c.charCodeAt(0)),audioContext=new AudioContext();let audioBuffer;try{audioBuffer=await audioContext.decodeAudioData(wavBytes.buffer.slice(0));}catch(error){await audioContext.close();throw new Error('audio_decode_failed:fixture:'+error.message);}
+    const destination=audioContext.createMediaStreamDestination(),source=audioContext.createBufferSource();source.buffer=audioBuffer;source.connect(destination);const mimeType=['audio/webm;codecs=opus','audio/webm'].find(type=>MediaRecorder.isTypeSupported(type));if(!mimeType){await audioContext.close();throw new Error('mediarecorder_webm_opus_unavailable');}
+    const chunks=[],recorder=new MediaRecorder(destination.stream,{mimeType,audioBitsPerSecond:64000});const stopped=new Promise((resolve,reject)=>{recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};recorder.onstop=resolve;recorder.onerror=event=>reject(new Error(event.error?.message||'mediarecorder_failed'));});recorder.start(100);source.start();source.onended=()=>{if(recorder.state!=='inactive')recorder.stop();};await stopped;await audioContext.close();
+    const webmBlob=new Blob(chunks,{type:mimeType});if(webmBlob.size<1000)throw new Error('mediarecorder_webm_empty');
+    const {browserAudioAssetStore}=await import(chrome.runtime.getURL('audio-store.js')),store=browserAudioAssetStore();if(!store)throw new Error('indexeddb_failed:audio_store_unavailable');const audioRef='e2e-webm';await store.put({id:audioRef,blob:webmBlob,mimeType,durationMs:Math.round(audioBuffer.duration*1000),createdAt:new Date().toISOString()});const roundTrip=await store.get(audioRef);if(!roundTrip?.blob||roundTrip.blob.size!==webmBlob.size)throw new Error('indexeddb_failed:roundtrip');
+    const checkpoint={id:'e2e-checkpoint',contextId:'e2e-context',originalText:'',audioRef,audioMimeType:mimeType,audioDurationMs:Math.round(audioBuffer.duration*1000),transcript:null,transcriptionEngine:null,targetMemberIds:null,createdAt:new Date().toISOString(),resolvedAt:null};await chrome.storage.local.set({'checkpoint:checkpoints':[checkpoint]});await chrome.storage.session.remove('selfrelay:last-transcription-diagnostic');
+    const response=await chrome.runtime.sendMessage({type:'TRANSCRIBE_CHECKPOINT',checkpointId:checkpoint.id,language:'es'});let directOffscreen=null;if(!response?.ok){try{directOffscreen=await chrome.runtime.sendMessage({target:'offscreen',type:'OFFSCREEN_TRANSCRIBE',audioRef,language:'es'});}catch(error){directOffscreen={ok:false,error:'offscreen_failed',detail:error instanceof Error?error.message:String(error)};}}
+    const stored=(await chrome.storage.local.get('checkpoint:checkpoints'))['checkpoint:checkpoints']?.[0],diagnostic=(await chrome.storage.session.get('selfrelay:last-transcription-diagnostic'))['selfrelay:last-transcription-diagnostic']||null;
+    return{isolation,logoState,mediaRecorder:{mimeType,size:webmBlob.size,durationMs:checkpoint.audioDurationMs},indexedDb:{storedSize:roundTrip.blob.size},response,directOffscreen,diagnostic,storedTranscript:stored?.transcript||'',storedEngine:stored?.transcriptionEngine||null};
+  },fixtureBase64);
+
+  const offscreenState=await serviceWorker.evaluate(async()=>{const hasDocument=typeof chrome.offscreen?.hasDocument==='function'?await chrome.offscreen.hasDocument():null;let contexts=[];try{if(chrome.runtime.getContexts)contexts=(await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']})).map(item=>({type:item.contextType,url:item.documentUrl||''}));}catch{}return{hasDocument,contexts};});
+  console.log(`Popup JS: present=${popupJsState.scriptPresent}, fetched=${popupJsState.fetchOk}, listener=${initState.listenerType}, state=${initState.stateText}`);
+  console.log(`Disclosure clicks: open=${JSON.stringify(openClick)}, close=${JSON.stringify(closeClick)}`);
+  console.log(`Disclosure: ${JSON.stringify(disclosure)}`);
+  console.log(`Logo: ${JSON.stringify(result.logoState)}`);
+  console.log(`Runtime isolation: crossOriginIsolated=${result.isolation.crossOriginIsolated}, SharedArrayBuffer=${result.isolation.sharedArrayBuffer}`);
+  console.log(`SelfRelay Chromium MediaRecorder: ${result.mediaRecorder.mimeType}, ${result.mediaRecorder.size} bytes, ${result.mediaRecorder.durationMs} ms`);
+  console.log(`IndexedDB round-trip: ${result.indexedDb.storedSize} bytes`);
+  console.log(`Offscreen state: ${JSON.stringify(offscreenState)}`);
+  if(result.diagnostic)console.log(`Transcription diagnostic: ${JSON.stringify(result.diagnostic)}`);if(result.directOffscreen)console.log(`Direct offscreen response: ${JSON.stringify(result.directOffscreen)}`);
+
+  if(consoleErrors.length||pageErrors.length||failedRequests.length)throw new Error(`popup_runtime_errors:${JSON.stringify({consoleErrors,pageErrors,failedRequests})}`);
+  if(!popupJsState.scriptPresent||popupJsState.scriptType!=='module'||!popupJsState.fetchOk)throw new Error(`popup_js_missing:${JSON.stringify(popupJsState)}`);
+  if(!result?.isolation?.crossOriginIsolated||result.isolation.sharedArrayBuffer!=='function')throw new Error(`cross_origin_isolation_missing:${JSON.stringify(result?.isolation)}`);
+  if(result.logoState?.src!=='icons/icon32.png'||!result.logoState.complete||result.logoState.naturalWidth<=0||result.logoState.naturalHeight<=0||!result.logoState.decodeOk||!result.logoState.visible||!result.logoState.leftOfBrand)throw new Error(`logo_render_failed:${JSON.stringify(result.logoState)}`);
+  if(disclosure.initial.expanded!=='false'||disclosure.initial.hidden!==true||disclosure.initial.listenerType!=='function'||openClick.expanded!=='true'||openClick.hidden!==false||disclosure.open.expanded!=='true'||disclosure.open.hidden!==false||closeClick.expanded!=='false'||closeClick.hidden!==true||disclosure.closed.expanded!=='false'||disclosure.closed.hidden!==true)throw new Error(`disclosure_failed:${JSON.stringify({openClick,closeClick,disclosure})}`);
+  if(!String(result.mediaRecorder?.mimeType||'').startsWith('audio/webm')||result.mediaRecorder?.size<1000)throw new Error(`mediarecorder_fixture_failed:${JSON.stringify(result.mediaRecorder)}`);
+  if(result.indexedDb?.storedSize!==result.mediaRecorder.size)throw new Error(`indexeddb_failed:${JSON.stringify(result.indexedDb)}`);
+  if(offscreenState.hasDocument!==true||!offscreenState.contexts.some(item=>item.url.endsWith('/offscreen.html')))throw new Error(`offscreen_failed:${JSON.stringify(offscreenState)}`);
+  if(!result.response?.ok){const exact=result.directOffscreen&&!result.directOffscreen.ok?result.directOffscreen:result.diagnostic||result.response,code=String(exact?.error||exact?.code||'whisper_runtime_failed'),detail=String(exact?.detail||'');throw new Error(`${code}:${detail}`);}
+  const transcript=String(result.storedTranscript||'').trim();if(transcript.length<8)throw new Error(`whisper_runtime_failed:empty_transcript:${JSON.stringify(result)}`);const normalized=transcript.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(),hits=['hola','prueba','sistema','reconocimiento'].filter(word=>normalized.includes(word));if(hits.length<2)throw new Error(`whisper_runtime_failed:spanish_recall(${hits.length}/4):${transcript}`);
+  console.log(`SelfRelay extension id: ${extensionId}`);console.log(`SelfRelay Chromium E2E transcript: ${transcript}`);console.log(`Transcription engine: ${result.storedEngine}`);console.log('SelfRelay packaged transcription E2E: PASS');
+}finally{await context.close();await new Promise(resolve=>server.close(resolve));}
