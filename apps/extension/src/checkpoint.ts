@@ -8,6 +8,7 @@ const meta=document.querySelector<HTMLElement>('#meta')!;
 const text=document.querySelector<HTMLTextAreaElement>('#text')!;
 const statusEl=document.querySelector<HTMLElement>('#status')!;
 const save=document.querySelector<HTMLButtonElement>('#save')!;
+const saveLabel=save.querySelector<HTMLElement>('span')!;
 const skip=document.querySelector<HTMLButtonElement>('#skip')!;
 const record=document.querySelector<HTMLButtonElement>('#record')!;
 const recordingPanel=document.querySelector<HTMLElement>('#recording')!;
@@ -29,6 +30,7 @@ const assetStore=browserAudioAssetStore();
 type DraftAudio={blob:Blob;mimeType:string;durationMs:number};
 type TargetMode='closed'|'all'|'custom';
 type TargetMember={id:string;url:string;title:string;faviconUrl:string|null;closed:boolean};
+type StopMode='review'|'discard'|'save';
 let draft:DraftAudio|null=null;
 let recorder:MediaRecorder|null=null;
 let stream:MediaStream|null=null;
@@ -38,7 +40,12 @@ let tick:number|undefined;
 let meterFrame:number|undefined;
 let meterContext:AudioContext|null=null;
 let previewUrl:string|null=null;
-let cancelRequested=false;
+let stopMode:StopMode='review';
+let recordingDone:Promise<DraftAudio|null>|null=null;
+let resolveRecording:((value:DraftAudio|null)=>void)|null=null;
+let rejectRecording:((reason?:unknown)=>void)|null=null;
+let recordingSettled=true;
+let saveInFlight=false;
 let pending:any=null;
 let members:TargetMember[]=[];
 let closedMemberIds:string[]=[];
@@ -51,8 +58,8 @@ void init();
 async function init(){
   const ok=await refreshPendingView();if(!ok)return;
   record.onclick=()=>void startRecording();
-  stopRecording.onclick=()=>stopActiveRecording(false);
-  cancelRecording.onclick=()=>stopActiveRecording(true);
+  stopRecording.onclick=()=>{void stopActiveRecording('review').catch(()=>{});};
+  cancelRecording.onclick=()=>{void stopActiveRecording('discard').catch(()=>{});};
   redoRecording.onclick=()=>void redo();
   targetClosed.onclick=()=>selectTargetMode('closed',true);
   targetAll.onclick=()=>selectTargetMode('all',true);
@@ -103,8 +110,8 @@ function mergeTargetMembers(current:BrowserContextMember[],closed:PendingClosedM
 }
 
 function memberLabel(member:PendingClosedMember){
-  const title=String(member.title||'').trim();
-  if(title&&title!==member.url&&title.length<=58)return title;
+  const memberTitle=String(member.title||'').trim();
+  if(memberTitle&&memberTitle!==member.url&&memberTitle.length<=58)return memberTitle;
   try{return new URL(member.url).hostname||member.url;}catch{return member.url;}
 }
 
@@ -135,20 +142,39 @@ function renderTargets(){
 }
 
 function preferredMimeType(){for(const type of ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'])if(MediaRecorder.isTypeSupported(type))return type;return '';}
+function beginRecordingCompletion(){recordingSettled=false;recordingDone=new Promise<DraftAudio|null>((resolve,reject)=>{resolveRecording=resolve;rejectRecording=reject;});}
+function settleRecording(value:DraftAudio|null,error?:unknown){if(recordingSettled)return;recordingSettled=true;const resolve=resolveRecording,reject=rejectRecording;resolveRecording=null;rejectRecording=null;if(error)reject?.(error);else resolve?.(value);}
 
 async function startRecording(){
-  if(recorder)return;clearStatus();
+  if(recorder||saveInFlight)return;clearStatus();
   if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){showError('La grabación no está disponible en este navegador.');return;}
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     const mimeType=preferredMimeType();recorder=mimeType?new MediaRecorder(stream,{mimeType,audioBitsPerSecond:64000}):new MediaRecorder(stream,{audioBitsPerSecond:64000});
-    chunks=[];cancelRequested=false;startedAt=Date.now();recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};recorder.onstop=()=>void finishRecording();recorder.onerror=()=>{showError('La grabación se interrumpió. Podés intentar de nuevo.');cleanupRecorder();};recorder.start(250);recordingPanel.hidden=false;audioReview.hidden=true;record.disabled=true;startTimer();startMeter(stream);
-  }catch(error:any){cleanupRecorder();showError(error?.name==='NotAllowedError'?'SelfRelay necesita permiso de micrófono para grabar este checkpoint.':'No se pudo iniciar el micrófono.');}
+    chunks=[];stopMode='review';startedAt=Date.now();beginRecordingCompletion();
+    recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};
+    recorder.onstop=()=>void finishRecording();
+    recorder.onerror=event=>{const error=new Error((event as any)?.error?.message||'mediarecorder_failed');settleRecording(null,error);showError('La grabación se interrumpió. Podés intentar de nuevo.');cleanupRecorder();};
+    recorder.start(250);recordingPanel.hidden=false;audioReview.hidden=true;record.disabled=true;startTimer();startMeter(stream);
+  }catch(error:any){cleanupRecorder();settleRecording(null,error);showError(error?.name==='NotAllowedError'?'SelfRelay necesita permiso de micrófono para grabar este checkpoint.':'No se pudo iniciar el micrófono.');}
 }
 
-function stopActiveRecording(cancel:boolean){if(!recorder)return;cancelRequested=cancel;try{if(recorder.state!=='inactive')recorder.stop();}catch{cleanupRecorder();}}
-async function finishRecording(){const elapsed=Math.max(0,Date.now()-startedAt),mimeType=recorder?.mimeType||preferredMimeType()||'audio/webm',blob=new Blob(chunks,{type:mimeType}),cancelled=cancelRequested;cleanupRecorder();if(cancelled||blob.size===0){if(blob.size===0&&!cancelled)showError('No se registró audio. Intentá de nuevo.');return;}draft={blob,mimeType,durationMs:elapsed};setPreview(blob,elapsed);}
-function cleanupRecorder(){if(tick!==undefined){clearInterval(tick);tick=undefined;}if(meterFrame!==undefined){cancelAnimationFrame(meterFrame);meterFrame=undefined;}if(meterContext){void meterContext.close();meterContext=null;}if(stream){for(const track of stream.getTracks())track.stop();stream=null;}recorder=null;chunks=[];recordingPanel.hidden=true;record.disabled=false;timer.textContent='00:00';renderMeter(0);}
+function stopActiveRecording(mode:StopMode){
+  if(!recorder)return Promise.resolve(draft);
+  stopMode=mode;const completion=recordingDone??Promise.resolve<DraftAudio|null>(null);
+  try{if(recorder.state!=='inactive')recorder.stop();}catch(error){cleanupRecorder();settleRecording(null,error);}
+  return completion;
+}
+async function finishRecording(){
+  const elapsed=Math.max(0,Date.now()-startedAt),mimeType=recorder?.mimeType||preferredMimeType()||'audio/webm',blob=new Blob(chunks,{type:mimeType}),mode=stopMode;
+  cleanupRecorder();
+  if(mode==='discard'){clearDraft();settleRecording(null);return;}
+  if(blob.size===0){const error=new Error('empty_audio');showError('No se registró audio. Intentá de nuevo.');settleRecording(null,mode==='save'?error:undefined);return;}
+  const finalized:DraftAudio={blob,mimeType,durationMs:elapsed};draft=finalized;
+  if(mode==='review')setPreview(blob,elapsed);else audioReview.hidden=true;
+  settleRecording(finalized);
+}
+function cleanupRecorder(){if(tick!==undefined){clearInterval(tick);tick=undefined;}if(meterFrame!==undefined){cancelAnimationFrame(meterFrame);meterFrame=undefined;}if(meterContext){void meterContext.close();meterContext=null;}if(stream){for(const track of stream.getTracks())track.stop();stream=null;}recorder=null;chunks=[];recordingPanel.hidden=true;record.disabled=saveInFlight;timer.textContent='00:00';renderMeter(0);}
 function startTimer(){const update=()=>{const seconds=Math.floor((Date.now()-startedAt)/1000);timer.textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;};update();tick=window.setInterval(update,250);}
 function startMeter(activeStream:MediaStream){try{meterContext=new AudioContext();const analyser=meterContext.createAnalyser();analyser.fftSize=256;analyser.smoothingTimeConstant=.72;meterContext.createMediaStreamSource(activeStream).connect(analyser);const data=new Uint8Array(analyser.frequencyBinCount);const draw=()=>{analyser.getByteFrequencyData(data);let total=0;for(const value of data)total+=value;renderMeter(total/(data.length*255));meterFrame=requestAnimationFrame(draw);};draw();}catch{renderMeter(.2);}}
 function renderMeter(level:number){const active=Math.round(Math.max(0,Math.min(1,level*2.4))*meterBars.length);meterBars.forEach((bar,index)=>{const strength=index<active?Math.max(.2,level):.08;bar.style.height=`${4+Math.round(strength*13)}px`;bar.style.background=index<active?'#17a8bb':'#9aa6b5';});}
@@ -163,19 +189,23 @@ function checkpointTargetIds(){
 }
 
 async function saveCheckpoint(){
-  if(recorder)return;const typed=text.value.trim();if(!typed&&!draft){showError('Escribí algo o grabá un audio antes de guardar.');return;}
+  if(saveInFlight)return;
+  const typed=text.value.trim();if(!typed&&!draft&&!recorder){showError('Escribí algo o grabá un audio antes de guardar.');return;}
   const targetMemberIds=checkpointTargetIds();if(Array.isArray(targetMemberIds)&&!targetMemberIds.length){showError('Elegí al menos una pestaña para este checkpoint.');return;}
-  setBusy(true);clearStatus();let storedRef:string|null=null;
+  saveInFlight=true;setBusy(true);setSavingState(true);statusEl.textContent='Guardando…';statusEl.classList.remove('error');let storedRef:string|null=null;
   try{
+    if(recorder){const finalized=await stopActiveRecording('save');if(!finalized)throw new Error('audio_finalize_failed');}
+    const finalText=text.value.trim();if(!finalText&&!draft)throw new Error('empty_checkpoint');
     if(draft){if(!assetStore)throw new Error('audio_storage_unavailable');storedRef=`audio-${crypto.randomUUID()}`;await assetStore.put({id:storedRef,blob:draft.blob,mimeType:draft.mimeType,durationMs:draft.durationMs,createdAt:new Date().toISOString()});}
-    const response=await chrome.runtime.sendMessage({type:'SAVE_CHECKPOINT',pendingId,payload:{text:typed,audioRef:storedRef,audioMimeType:draft?.mimeType??null,audioDurationMs:draft?.durationMs??null,transcript:null,transcriptionEngine:null,targetMemberIds}});
+    const response=await chrome.runtime.sendMessage({type:'SAVE_CHECKPOINT',pendingId,payload:{text:finalText,audioRef:storedRef,audioMimeType:draft?.mimeType??null,audioDurationMs:draft?.durationMs??null,transcript:null,transcriptionEngine:null,targetMemberIds}});
     if(!response?.ok)throw new Error(response?.error||'save_failed');if(response.nextPendingId){openPending(response.nextPendingId);return;}clearDraft();window.close();
-  }catch{if(storedRef&&assetStore)try{await assetStore.delete(storedRef);}catch{}showError('No se pudo guardar el checkpoint. Probá de nuevo.');setBusy(false);}
+  }catch{if(storedRef&&assetStore)try{await assetStore.delete(storedRef);}catch{}showError('No se pudo guardar el checkpoint. Probá de nuevo.');saveInFlight=false;setBusy(false);setSavingState(false);}
 }
 
-async function discardPending(){if(recorder)stopActiveRecording(true);setBusy(true);clearStatus();try{const response=await chrome.runtime.sendMessage({type:'DISCARD_PENDING_CAPTURE',pendingId});if(!response?.ok)throw new Error('discard_failed');clearDraft();if(response.nextPendingId){openPending(response.nextPendingId);return;}window.close();}catch{showError('No se pudo descartar. Probá de nuevo.');setBusy(false);}}
+async function discardPending(){if(saveInFlight)return;if(recorder)void stopActiveRecording('discard').catch(()=>{});setBusy(true);clearStatus();try{const response=await chrome.runtime.sendMessage({type:'DISCARD_PENDING_CAPTURE',pendingId});if(!response?.ok)throw new Error('discard_failed');clearDraft();if(response.nextPendingId){openPending(response.nextPendingId);return;}window.close();}catch{showError('No se pudo descartar. Probá de nuevo.');setBusy(false);}}
 function openPending(id:string){clearDraft();location.replace(chrome.runtime.getURL(`checkpoint.html?pending=${encodeURIComponent(id)}`));}
-function setBusy(value:boolean){save.disabled=value;skip.disabled=value;record.disabled=value;redoRecording.disabled=value;text.disabled=value;targetClosed.disabled=value;targetAll.disabled=value;targetCustom.disabled=value;for(const input of targetList.querySelectorAll<HTMLInputElement>('input'))input.disabled=value;}
+function setBusy(value:boolean){save.disabled=value;skip.disabled=value;record.disabled=value||Boolean(recorder);redoRecording.disabled=value;stopRecording.disabled=value;cancelRecording.disabled=value;text.disabled=value;targetClosed.disabled=value;targetAll.disabled=value;targetCustom.disabled=value;for(const input of targetList.querySelectorAll<HTMLInputElement>('input'))input.disabled=value;}
+function setSavingState(value:boolean){saveLabel.textContent=value?'Guardando…':'Guardar checkpoint';save.toggleAttribute('aria-busy',value);}
 function showError(message:string){statusEl.textContent=message;statusEl.classList.add('error');}
 function clearStatus(){statusEl.textContent='';statusEl.classList.remove('error');}
 function formatDuration(ms:number){const seconds=Math.max(0,Math.round(ms/1000));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;}
