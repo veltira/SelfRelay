@@ -1,77 +1,81 @@
 # SelfRelay
 
-SelfRelay reduce el costo de retomar trabajo interrumpido.
+SelfRelay ayuda a retomar una tarea interrumpida sin perder el contexto mental de lo que estabas haciendo.
 
-**contexto → salida → checkpoint → regreso → recuperación automática**
+**contexto → interrupción → checkpoint → regreso → recuperación automática**
 
-Este repositorio contiene el código fuente canónico del proyecto SelfRelay para CoderCup AI 2026. El ZIP automático del código fuente de GitHub **no es el producto que debe descargar un usuario**.
+Proyecto presentado a **CoderCup AI 2026**.
+
+## Para el jurado de CoderCup
+
+Cuando dejamos una tarea a medias, normalmente no perdemos el archivo: perdemos el contexto. Al volver horas o días después tenemos que reconstruir qué estábamos haciendo, qué habíamos pensado y cuál era el siguiente paso.
+
+SelfRelay convierte esa interrupción en un punto de retorno. Al salir de un contexto de trabajo seguido por SelfRelay, el usuario puede dejar un checkpoint breve en texto o audio. Cuando vuelve al mismo contexto, SelfRelay recupera ese checkpoint para ayudarlo a continuar desde donde lo dejó.
+
+La forma más rápida de probarlo es:
+
+1. Descargar la versión correspondiente desde **GitHub Releases**.
+2. Instalarla siguiendo las instrucciones de esta página.
+3. Seleccionar o seguir un contexto de trabajo.
+4. Salir de ese contexto y guardar un checkpoint.
+5. Volver al mismo contexto y comprobar la recuperación automática.
+
+No se necesita compilar el proyecto, usar terminal, configurar API keys ni contratar servicios de IA pagos.
+
+## Privacidad
+
+Los checkpoints se almacenan localmente. El audio permanece en el dispositivo y la transcripción se ejecuta de forma explícita y bajo demanda mediante un runtime local de Whisper, sin enviar el audio a una API remota de transcripción.
 
 ## Descargar SelfRelay
 
-La distribución para usuarios se realiza mediante **GitHub Releases** y cada plataforma tiene su propio archivo:
+Los usuarios y evaluadores **no deben descargar el ZIP del código fuente ni compilar el proyecto**. Las versiones preparadas para probar SelfRelay se distribuyen mediante **GitHub Releases**.
 
-| Producto | Archivo de distribución | Estado |
+| Versión | Archivo | Estado |
 | --- | --- | --- |
-| Extensión de Chrome | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validada |
-| SelfRelay para Windows | `SelfRelay-Setup.exe` | Candidata 0.2.2 en validación; se publicará como Release estable después de aprobación física |
+| Extensión para Chrome | `SelfRelay-Chrome.zip` | v0.4.3 validada |
+| Aplicación para Windows | `SelfRelay-Setup.exe` | Se publica cuando la candidata actual complete la validación física final |
 
-Un usuario de Windows solo necesita el instalador. No necesita Node.js, npm, Git, PowerShell, terminal, claves API ni herramientas de desarrollo.
-
-### Windows
-
-1. Descargar `SelfRelay-Setup.exe` desde Releases cuando la versión haya sido aprobada.
-2. Ejecutar el instalador normalmente.
-3. Abrir SelfRelay desde Windows.
-4. Elegir explícitamente qué aplicaciones quiere seguir.
-
-SelfRelay permanece disponible desde el área de notificación. Cerrar la ventana principal la oculta; la salida completa se realiza desde el menú de SelfRelay en el tray.
-
-### Chrome
+### Probar SelfRelay en Chrome
 
 1. Descargar `SelfRelay-Chrome.zip` desde Releases.
 2. Extraer el ZIP.
 3. Abrir `chrome://extensions`.
-4. Activar **Modo de desarrollador**.
+4. Activar **Modo desarrollador**.
 5. Elegir **Cargar descomprimida**.
 6. Seleccionar la carpeta extraída de SelfRelay.
+7. Abrir SelfRelay y seguir una pestaña, página o sitio.
+8. Salir o cerrar ese contexto y guardar un checkpoint en texto o audio.
+9. Volver al mismo contexto y comprobar que SelfRelay recupera el checkpoint pendiente.
 
-## Qué hace
+### Probar SelfRelay en Windows
 
-SelfRelay está diseñado para el momento en que una interrupción corta un trabajo y, al volver, hay que reconstruir mentalmente qué se estaba haciendo y cuál era el siguiente paso.
+Cuando `SelfRelay-Setup.exe` esté disponible en la Release estable:
 
-En Windows el flujo central es:
+1. Descargar `SelfRelay-Setup.exe` desde la Release oficial.
+2. Ejecutar el instalador.
+3. Abrir SelfRelay y agregar una aplicación compatible.
+4. Utilizar esa aplicación normalmente y luego cerrarla.
+5. Guardar el checkpoint que presenta SelfRelay.
+6. Volver a abrir la misma aplicación o contexto.
+7. Comprobar que SelfRelay ofrece automáticamente el checkpoint pendiente para retomarlo.
 
-1. el usuario elige una aplicación;
-2. SelfRelay observa únicamente esa aplicación y sus contextos relevantes;
-3. cuando ocurre una salida real del contexto —no una minimización ni un cambio de foco— se prepara un checkpoint durable;
-4. la ventana de captura permanece oculta hasta que su WebView real obtiene el ID exacto, React termina de renderizarlo y reporta readiness al backend;
-5. el usuario puede dejar texto y/o una nota de voz;
-6. al volver al mismo contexto, SelfRelay presenta los checkpoints que siguen pendientes, del más antiguo al más reciente, después del mismo handshake de readiness;
-7. **Lo veo después** conserva el checkpoint sin resolverlo y **Ya retomé** resuelve únicamente el momento elegido.
+## Aviso de Windows SmartScreen
 
-Los **Entornos** permiten agrupar varias aplicaciones que pertenecen al mismo trabajo. Un entorno continúa activo mientras al menos una de sus aplicaciones miembro siga activa.
+El instalador de Windows todavía no utiliza un certificado comercial de firma Authenticode. Por ese motivo, Microsoft Defender SmartScreen puede mostrar mensajes como **“Editor desconocido”** o **“Windows protegió su PC”** debido a la falta de reputación o firma del archivo.
 
-La selección de aplicaciones muestra únicamente candidatas user-facing después de filtrar hosts internos de Windows, nombres de recursos sin resolver y duplicados entre ventanas activas, App Paths, Start Menu, Uninstall y AppsFolder.
+Ese aviso de SmartScreen, por sí solo, **no significa que Windows haya detectado malware**. Para probar la aplicación, el instalador debe descargarse únicamente desde la Release oficial de `veltira/SelfRelay` y comprobarse el SHA-256 publicado cuando corresponda. Una detección real de malware por parte del antivirus no debe ignorarse.
 
-## Privacidad y audio
+## Qué hay dentro del repositorio
 
-El diseño es local-first. SelfRelay no necesita una cuenta ni un backend para guardar checkpoints.
+El repositorio contiene el código fuente y las pruebas del proyecto:
 
-Las aplicaciones seleccionadas, checkpoints, historial, audio y transcripciones permanecen en el equipo. La grabación de voz se conserva localmente. La transcripción no se ejecuta automáticamente al grabar, guardar o abrir un checkpoint: solo se inicia cuando el usuario pulsa explícitamente **Transcribir audio**, utilizando el runtime local de Whisper incluido con la aplicación.
+- `apps/extension` — extensión de Chrome.
+- `apps/desktop` — aplicación de escritorio para Windows.
+- `packages/shared` — modelos y semántica compartida de contextos y checkpoints.
+- `docs` — documentación de comportamiento, distribución y validación.
 
-## Arquitectura del repositorio
+La versión validada actualmente de la extensión de Chrome es **0.4.3**.
 
-- `apps/extension` — extensión de Chrome. La versión 0.4.3 está congelada durante el trabajo Desktop.
-- `apps/desktop` — aplicación Windows, frontend y núcleo Tauri/Rust.
-- `apps/web` — superficie web opcional, actualmente diferida.
-- `packages/shared` — modelos y semántica compartida del producto.
-- `docs` — contratos de comportamiento, validación y distribución.
-- `.github/workflows` — CI y empaquetado reproducible.
+## Desarrollo y validación
 
-El producto Windows final se compila como `SelfRelay.exe` con subsistema gráfico de Windows y se distribuye mediante un instalador NSIS versionado. Los workflows validan frontend, Rust, lifecycle, fixture Win32, estados runtime, WebViews reales instaladas, calidad de discovery, branding, Whisper local, upgrade, single-instance, instalación y desinstalación antes de producir una candidata.
-
-## Desarrollo
-
-Los comandos de desarrollo son únicamente para contribuidores y CI. No forman parte de la instalación del usuario.
-
-La extensión y Desktop tienen pipelines independientes. Una build automatizada no se considera una versión pública aprobada hasta superar también la validación física correspondiente.
+El proyecto incluye pruebas automáticas, empaquetado reproducible y validaciones específicas para los flujos principales de captura, recuperación y transcripción local. Los comandos y workflows de desarrollo están dentro del repositorio, pero **no son necesarios para que un evaluador pruebe SelfRelay**.
