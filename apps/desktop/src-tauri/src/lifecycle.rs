@@ -60,7 +60,6 @@ impl LifecycleState {
 
         let previous_contexts = self.windows.values().map(|context| context.context_id.clone()).collect::<HashSet<_>>();
         let next_contexts = next.values().map(|context| context.context_id.clone()).collect::<HashSet<_>>();
-        let next_apps = next.values().map(|context| context.application_id.clone()).collect::<HashSet<_>>();
 
         let mut captures = Vec::new();
         let mut captured_ids = HashSet::new();
@@ -71,7 +70,6 @@ impl LifecycleState {
                     continue;
                 }
             } else if !next_contexts.contains(&previous.context_id)
-                && !next_apps.contains(&previous.application_id)
                 && captured_ids.insert(previous.context_id.clone())
             {
                 captures.push(previous.clone());
@@ -189,6 +187,19 @@ mod tests {
         state.transition(&[record(3, "word", "word:a.docx", "A.docx")], &selected);
         let delta = state.transition(&[record(3, "word", "word:b.docx", "B.docx")], &selected);
         assert!(delta.captures.is_empty());
+    }
+
+    #[test]
+    fn one_specialized_context_can_exit_while_same_app_keeps_another_open() {
+        let mut state = LifecycleState::default();
+        let selected = tracked(&["app:word.exe"]);
+        state.transition(&[
+            record(3, "word", "word:a.docx", "A.docx"),
+            record(4, "word", "word:b.docx", "B.docx"),
+        ], &selected);
+        let delta = state.transition(&[record(4, "word", "word:b.docx", "B.docx")], &selected);
+        assert_eq!(delta.captures.len(), 1);
+        assert_eq!(delta.captures[0].context_id, "word:a.docx");
     }
 
     #[test]
