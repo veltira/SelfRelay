@@ -2,53 +2,75 @@
 
 SelfRelay reduces the cost of resuming interrupted work.
 
-Core product loop:
-
 **context → exit → checkpoint → return → automatic recovery**
 
-This repository is the canonical home for the CoderCup AI 2026 project.
+This repository is the canonical source repository for the CoderCup AI 2026 project.
 
-## Repository layout
+## Download SelfRelay
 
-- `apps/extension` — Maintainable TypeScript source for the Chrome extension.
-- `apps/desktop` — Desktop application placeholder; implementation follows the completed extension phase.
+End users and evaluators should **not** download the repository source ZIP or build SelfRelay themselves.
+
+User-ready builds belong in **GitHub Releases** and are intentionally separated by platform:
+
+| Product | Download asset | Status |
+| --- | --- | --- |
+| Chrome Extension | `SelfRelay-Chrome.zip` | Chrome v0.4.3 validated and ready for stable release |
+| Windows Desktop | `SelfRelay-Setup.exe` | In active development; installer will be published after native validation |
+
+Open the repository's **Releases** page to download the product you want to test. A stable release may contain both assets; you only download the one you need.
+
+### Chrome installation
+
+1. Download `SelfRelay-Chrome.zip` from Releases.
+2. Extract the ZIP.
+3. Open `chrome://extensions`.
+4. Enable **Developer mode**.
+5. Choose **Load unpacked**.
+6. Select the extracted SelfRelay folder.
+
+No Node.js, npm, Git, terminal, API key, model download or build step is required.
+
+### Windows installation
+
+When the Windows build is published:
+
+1. Download `SelfRelay-Setup.exe` from Releases.
+2. Double-click the installer.
+3. Install SelfRelay normally.
+4. Open SelfRelay.
+
+No development runtime or build tooling should be required by the evaluator.
+
+See `docs/CODERCUP_DELIVERY.md` for the intended evaluator-facing delivery layout and `docs/DISTRIBUTION.md` for the packaging contract.
+
+## Source layout
+
+The folders below are implementation source, not end-user downloads:
+
+- `apps/extension` — Chrome Extension TypeScript source.
+- `apps/desktop` — Windows Desktop source once the Desktop milestone is merged into `main`.
 - `apps/web` — Optional web surface; intentionally deferred.
 - `packages/shared` — Shared Context/Checkpoint models and product semantics.
-- `supabase` — Reserved for a future backend only if local-first stops being sufficient.
-- `docs` — Product, behavioral reference and technical status.
-- `artifacts/chrome-extension-unpacked` — Preserved historical extension artifact; no longer the current product build.
+- `docs` — Product behavior, distribution and validation documentation.
+- `artifacts/chrome-extension-unpacked` — Historical extension artifact only; not the current product build.
 
 ## Chrome product
 
-The extension follows explicitly selected browser contexts by tab, exact page or site. When work is interrupted it captures a checkpoint; when the user returns it automatically restores the latest unresolved checkpoint in that context.
+The extension follows explicitly selected browser contexts by tab, exact page or site. When work is interrupted it captures a checkpoint; when the user returns it restores unresolved checkpoints relevant to that context.
 
-Checkpoints support text and local audio. Audio binaries live in IndexedDB. Transcription never requires an account, API key, token or backend: SelfRelay prefers Chrome on-device recognition only when Chrome explicitly guarantees local processing, then falls back to a Whisper.cpp/WASM multilingual runtime and model bundled in the extension package.
+Checkpoints support text and local audio. Audio lives locally in IndexedDB. Transcription is on-demand and local, using the packaged Whisper.cpp/WASM runtime rather than a remote API.
 
-## User distribution
+The current validated Chrome product version is **0.4.3**.
 
-End users and CoderCup evaluators must not build SelfRelay from source.
+## Development
 
-The Chrome deliverable is:
-
-`SelfRelay-Chrome.zip`
-
-Expected use is download → extract → `chrome://extensions` → Developer mode → Load unpacked → select the extracted folder.
-
-The tester must not need Node.js, npm, TypeScript, Git, terminal commands, dependencies, environment variables, model downloads, API keys or source edits. See `docs/DISTRIBUTION.md` for the full delivery contract.
-
-Desktop will use a normal installer when implemented, with `SelfRelay-Setup.exe` as the primary Windows deliverable.
-
-## Extension development
-
-The commands below are for contributors and CI only, not product users:
+These commands are for contributors and CI only, not product users:
 
 ```bash
 npm install
 npm run check
 ```
 
-`npm run check` builds the shared package, typechecks the extension, runs tests and emits the unpacked extension at `apps/extension/dist/`.
+`.github/workflows/package.yml` validates the extension, packages the local Whisper assets, runs browser QA, produces `SelfRelay-Chrome.zip`, and is configured so version tags can publish that package through GitHub Releases.
 
-`.github/workflows/package.yml` additionally builds the pinned local Whisper/WASM fallback, verifies its model digest, validates the complete extension and creates `SelfRelay-Chrome.zip` automatically. Tagged versions can publish the same artifact through GitHub Releases.
-
-Do not mix this project with BBTY, TNcesito, or any other project.
+Do not mix this project with unrelated repositories or products.
