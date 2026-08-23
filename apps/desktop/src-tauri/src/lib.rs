@@ -1,4 +1,5 @@
 mod adapters;
+pub mod checkpoints;
 mod classification;
 mod model;
 mod observer;
