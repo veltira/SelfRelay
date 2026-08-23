@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "desktop/**"
+      - "final/**"
     paths:
       - "apps/desktop/**"
       - ".github/workflows/desktop-package.yml"
