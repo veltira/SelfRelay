@@ -48,6 +48,8 @@ mod tests {
             pid: 2,
             executable_path: Some(format!("C:/{exe}")),
             executable_name: exe.into(),
+            package_family_name: None,
+            app_user_model_id: None,
             raw_title: "Work".into(),
             visible: true,
             is_top_level: true,
