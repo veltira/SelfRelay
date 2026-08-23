@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import logoUrl from "../../../assets/branding/selfrelay-logo.png";
@@ -11,19 +11,10 @@ import type {
   TrackingStatus,
 } from "./types";
 
+const DESKTOP_VERSION = "0.1.1";
+
 function appInitial(name: string) {
   return name.trim().slice(0, 1).toUpperCase() || "A";
-}
-
-function mergeApps(discovered: DiscoveredApplication[], tracked: TrackedApplication[]) {
-  const map = new Map<string, DiscoveredApplication>();
-  for (const app of discovered) map.set(app.applicationId, app);
-  for (const app of tracked) {
-    if (!map.has(app.applicationId)) {
-      map.set(app.applicationId, { ...app, running: false, foreground: false });
-    }
-  }
-  return [...map.values()].sort((a, b) => Number(b.foreground) - Number(a.foreground) || a.applicationName.localeCompare(b.applicationName));
 }
 
 function formatCheckpointTime(value: number) {
@@ -32,6 +23,10 @@ function formatCheckpointTime(value: number) {
   } catch {
     return "";
   }
+}
+
+function byApplicationName<T extends { applicationName: string }>(a: T, b: T) {
+  return a.applicationName.localeCompare(b.applicationName);
 }
 
 export default function App() {
@@ -47,6 +42,7 @@ export default function App() {
   const [section, setSection] = useState<"apps" | "history">("apps");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const onboardingSelectionInitialized = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,10 +62,10 @@ export default function App() {
       setCapture(nextCapture);
       setRecovery(nextRecovery);
       setHistory(nextHistory);
-      setSelected((current) => {
-        if (nextOnboarding || current.size > 0) return current;
-        return new Map(nextTracked.map((app) => [app.applicationId, app]));
-      });
+      if (!nextOnboarding && !onboardingSelectionInitialized.current) {
+        onboardingSelectionInitialized.current = true;
+        setSelected(new Map(nextTracked.map((application) => [application.applicationId, application])));
+      }
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -89,8 +85,17 @@ export default function App() {
     };
   }, [refresh]);
 
-  const allApps = useMemo(() => mergeApps(discovered, tracked), [discovered, tracked]);
-  const runningIds = useMemo(() => new Set(discovered.map((app) => app.applicationId)), [discovered]);
+  const trackedIds = useMemo(() => new Set(tracked.map((application) => application.applicationId)), [tracked]);
+  const availableNow = useMemo(
+    () => discovered.filter((application) => !trackedIds.has(application.applicationId)).sort(byApplicationName),
+    [discovered, trackedIds],
+  );
+  const onboardingSelected = useMemo(() => [...selected.values()].sort(byApplicationName), [selected]);
+  const onboardingAvailable = useMemo(
+    () => discovered.filter((application) => !selected.has(application.applicationId)).sort(byApplicationName),
+    [discovered, selected],
+  );
+  const runningIds = useMemo(() => new Set(discovered.map((application) => application.applicationId)), [discovered]);
 
   const chooseExecutable = async (persistImmediately: boolean) => {
     setBusy(true);
@@ -99,10 +104,11 @@ export default function App() {
       if (!picked) return;
       if (persistImmediately) {
         await invoke("set_application_tracking", { application: picked, enabled: true });
+        await refresh();
       } else {
         setSelected((current) => new Map(current).set(picked.applicationId, picked));
       }
-      await refresh();
+      setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -110,11 +116,10 @@ export default function App() {
     }
   };
 
-  const finishOnboarding = async () => {
+  const addTracked = async (application: TrackedApplication) => {
     setBusy(true);
     try {
-      await invoke("complete_onboarding", { applications: [...selected.values()] });
-      setOnboardingCompleted(true);
+      await invoke("set_application_tracking", { application, enabled: true });
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -128,6 +133,21 @@ export default function App() {
     try {
       await invoke("set_application_tracking", { application, enabled: false });
       await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finishOnboarding = async () => {
+    setBusy(true);
+    try {
+      await invoke("complete_onboarding", { applications: onboardingSelected });
+      setOnboardingCompleted(true);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -138,6 +158,8 @@ export default function App() {
     try {
       await invoke("set_tracking_paused", { paused: status.active });
       await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -165,41 +187,50 @@ export default function App() {
     return (
       <main className="shell onboarding-shell">
         <section className="onboarding-card">
-          <div className="onboarding-brand"><img src={logoUrl} alt="" /><span>SelfRelay</span></div>
+          <div className="onboarding-brand"><img src={logoUrl} alt="" /><span>SelfRelay</span><small>v{DESKTOP_VERSION}</small></div>
           <p className="eyebrow">Configuración inicial</p>
-          <h1>Elegí dónde querés que SelfRelay te acompañe.</h1>
-          <p className="lead">Solo las aplicaciones que selecciones podrán generar checkpoints. Podés cambiar esta lista cuando quieras.</p>
+          <h1>Elegí qué aplicaciones querés seguir.</h1>
+          <p className="lead">SelfRelay empieza con cero aplicaciones en seguimiento. Solo lo que añadas explícitamente podrá generar checkpoints.</p>
 
-          <div className="selection-list">
-            {allApps.length === 0 ? (
-              <div className="empty-state compact"><strong>No hay aplicaciones elegibles abiertas.</strong><span>Podés abrir una aplicación o añadir su ejecutable manualmente.</span></div>
-            ) : allApps.map((application) => {
-              const checked = selected.has(application.applicationId);
-              return (
-                <label className={`selection-row ${checked ? "selected" : ""}`} key={application.applicationId}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => setSelected((current) => {
-                      const next = new Map(current);
-                      if (next.has(application.applicationId)) next.delete(application.applicationId);
-                      else next.set(application.applicationId, application);
-                      return next;
-                    })}
-                  />
+          <div className="management-group">
+            <div className="group-heading"><strong>En seguimiento al continuar</strong><span>{onboardingSelected.length}</span></div>
+            {onboardingSelected.length === 0 ? (
+              <div className="empty-state compact"><strong>Ninguna aplicación seleccionada.</strong><span>Podés continuar así y SelfRelay no seguirá nada.</span></div>
+            ) : (
+              <div className="app-list">{onboardingSelected.map((application) => (
+                <article className="app-row" key={application.applicationId}>
                   <span className="app-icon">{appInitial(application.applicationName)}</span>
-                  <span className="app-copy"><strong>{application.applicationName}</strong><small>{application.running ? "Abierta ahora" : "Añadida manualmente"}</small></span>
-                  <span className="checkmark" aria-hidden="true">✓</span>
-                </label>
-              );
-            })}
+                  <div className="app-copy"><strong>{application.applicationName}</strong><small>En seguimiento</small></div>
+                  <button className="button secondary row-action" disabled={busy} onClick={() => setSelected((current) => {
+                    const next = new Map(current);
+                    next.delete(application.applicationId);
+                    return next;
+                  })}>Quitar</button>
+                </article>
+              ))}</div>
+            )}
+          </div>
+
+          <div className="management-group">
+            <div className="group-heading"><strong>Disponibles ahora</strong><span>{onboardingAvailable.length}</span></div>
+            {onboardingAvailable.length === 0 ? (
+              <div className="empty-state compact"><strong>No hay otras aplicaciones elegibles abiertas.</strong><span>Abrí Notepad, Paint u otra app para verla acá, o elegí un ejecutable.</span></div>
+            ) : (
+              <div className="app-list">{onboardingAvailable.map((application) => (
+                <article className="app-row" key={application.applicationId}>
+                  <span className="app-icon">{appInitial(application.applicationName)}</span>
+                  <div className="app-copy"><strong>{application.applicationName}</strong><small>Abierta ahora · no seguida</small></div>
+                  <button className="button primary row-action" disabled={busy} onClick={() => setSelected((current) => new Map(current).set(application.applicationId, application))}>Añadir</button>
+                </article>
+              ))}</div>
+            )}
           </div>
 
           <div className="onboarding-actions">
-            <button className="button secondary" disabled={busy} onClick={() => void chooseExecutable(false)}>+ Añadir aplicación</button>
+            <button className="button secondary" disabled={busy} onClick={() => void chooseExecutable(false)}>Elegir otra aplicación</button>
             <button className="button primary" disabled={busy} onClick={() => void finishOnboarding()}>Continuar</button>
           </div>
-          <p className="privacy-note">SelfRelay usa metadata mínima de ventanas. No toma capturas, no lee documentos, no registra teclas y no sube datos.</p>
+          <p className="privacy-note">Todo queda local. SelfRelay usa metadata mínima de ventanas para reconocer las aplicaciones que elegiste; no lee documentos, no registra teclas y no sube datos.</p>
           {error && <div className="notice notice-error">{error}</div>}
         </section>
       </main>
@@ -209,7 +240,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <div className="brand"><img src={logoUrl} alt="" className="brand-logo" /><span>SelfRelay</span></div>
+        <div className="brand"><img src={logoUrl} alt="" className="brand-logo" /><span>SelfRelay</span><small>v{DESKTOP_VERSION}</small></div>
         <div className="top-actions">
           <button className="text-button" onClick={() => setSection(section === "apps" ? "history" : "apps")}>{section === "apps" ? "Historial" : "Aplicaciones"}</button>
           <button className={`status ${status.active ? "status-active" : "status-paused"}`} disabled={busy} onClick={() => void togglePaused()}>
@@ -222,25 +253,49 @@ export default function App() {
         {section === "apps" ? (
           <>
             <div className="section-heading">
-              <div><p className="eyebrow">Tu entorno</p><h1>Aplicaciones</h1><p className="section-description">SelfRelay solo crea checkpoints para esta lista.</p></div>
-              <button className="button primary compact-button" disabled={busy} onClick={() => void chooseExecutable(true)}>+ Añadir</button>
+              <div><p className="eyebrow">Tu entorno</p><h1>Aplicaciones</h1><p className="section-description">Añadí o quitá aplicaciones en cualquier momento. Solo las marcadas como “En seguimiento” pueden generar checkpoints.</p></div>
             </div>
 
-            {tracked.length === 0 ? (
-              <div className="empty-state"><strong>No seguís ninguna aplicación.</strong><span>Añadí una para activar el loop de checkpoint y retorno.</span></div>
-            ) : (
-              <div className="app-list">
-                {tracked.map((application) => (
-                  <article className="app-row" key={application.applicationId}>
-                    <span className="app-icon">{appInitial(application.applicationName)}</span>
-                    <div className="app-copy"><strong>{application.applicationName}</strong><small>{runningIds.has(application.applicationId) ? "Abierta · elegible ahora" : "En seguimiento"}</small></div>
-                    <span className={`availability ${runningIds.has(application.applicationId) ? "online" : ""}`}>{runningIds.has(application.applicationId) ? "Activa" : "Esperando"}</span>
-                    <button className="icon-button" title="Quitar aplicación" disabled={busy} onClick={() => void removeTracked(application)}>Quitar</button>
-                  </article>
-                ))}
-              </div>
-            )}
-            <p className="privacy-line">La observación de Windows descubre solo metadata necesaria para reconocer aplicaciones. Checkpoint y recovery se limitan a las que elegiste.</p>
+            <div className="management-group">
+              <div className="group-heading"><strong>En seguimiento</strong><span>{tracked.length}</span></div>
+              {tracked.length === 0 ? (
+                <div className="empty-state"><strong>No seguís ninguna aplicación.</strong><span>No se crearán checkpoints hasta que añadas una aplicación de forma explícita.</span></div>
+              ) : (
+                <div className="app-list">
+                  {tracked.map((application) => (
+                    <article className="app-row" key={application.applicationId}>
+                      <span className="app-icon">{appInitial(application.applicationName)}</span>
+                      <div className="app-copy"><strong>{application.applicationName}</strong><small>{runningIds.has(application.applicationId) ? "En seguimiento · abierta ahora" : "En seguimiento · esperando"}</small></div>
+                      <span className="tracked-badge">En seguimiento</span>
+                      <button className="button secondary row-action" disabled={busy} onClick={() => void removeTracked(application)}>Quitar</button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="management-group">
+              <div className="group-heading"><strong>Disponibles ahora</strong><span>{availableNow.length}</span></div>
+              {availableNow.length === 0 ? (
+                <div className="empty-state compact"><strong>No hay aplicaciones nuevas disponibles.</strong><span>Abrí una aplicación de escritorio elegible y aparecerá acá automáticamente.</span></div>
+              ) : (
+                <div className="app-list">
+                  {availableNow.map((application) => (
+                    <article className="app-row" key={application.applicationId}>
+                      <span className="app-icon">{appInitial(application.applicationName)}</span>
+                      <div className="app-copy"><strong>{application.applicationName}</strong><small>Abierta ahora · no seguida</small></div>
+                      <button className="button primary row-action" disabled={busy} onClick={() => void addTracked(application)}>Añadir</button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="manual-add-row">
+              <div><strong>¿No aparece la aplicación?</strong><span>Elegí su archivo .exe como alternativa.</span></div>
+              <button className="button secondary" disabled={busy} onClick={() => void chooseExecutable(true)}>Elegir otra aplicación</button>
+            </div>
+            <p className="privacy-line">La lista pública agrupa aplicaciones, no ventanas técnicas. HWND, PID y metadata interna del observer no se muestran ni se usan como identidad durable.</p>
           </>
         ) : (
           <>
