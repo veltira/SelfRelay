@@ -15,7 +15,7 @@ impl Checkpoint {
     }
 
     pub fn defer(&mut self) {
-        // "Lo veo después" intentionally preserves the unresolved checkpoint.
+        // "Lo veo después" intentionally preserves resolved_at_ms = None.
     }
 
     pub fn resolve(&mut self, resolved_at_ms: u64) {
