@@ -30,12 +30,8 @@ fn wait_phase(control: &Path, expected: &str) {
     let phase = control.join("phase.txt");
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if fs::read_to_string(&phase).map(|value| value == expected).unwrap_or(false) {
-            return;
-        }
-        if Instant::now() > deadline {
-            panic!("native fixture did not reach phase {expected}");
-        }
+        if fs::read_to_string(&phase).map(|value| value == expected).unwrap_or(false) { return; }
+        if Instant::now() > deadline { panic!("native fixture did not reach phase {expected}"); }
         thread::sleep(Duration::from_millis(30));
     }
 }
@@ -47,14 +43,9 @@ fn advance(control: &Path, phase: &str) {
 fn wait_fixture_count(registry: &WindowRegistry, expected: usize) {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
-        if fixture_records(registry).len() == expected {
-            return;
-        }
+        if fixture_records(registry).len() == expected { return; }
         if Instant::now() > deadline {
-            panic!(
-                "observer fixture window count did not become {expected}; current={}",
-                fixture_records(registry).len()
-            );
+            panic!("observer fixture window count did not become {expected}; current={}", fixture_records(registry).len());
         }
         thread::sleep(Duration::from_millis(25));
     }
@@ -63,27 +54,24 @@ fn wait_fixture_count(registry: &WindowRegistry, expected: usize) {
 #[test]
 #[ignore = "requires a real Windows desktop session and compiled fixture executable"]
 fn native_win32_fixture_sequence() {
-    let fixture = PathBuf::from(
-        std::env::var("SELFRELAY_FIXTURE_EXE")
-            .expect("SELFRELAY_FIXTURE_EXE must point at selfrelay-window-fixture.exe"),
-    );
+    let fixture = PathBuf::from(std::env::var("SELFRELAY_FIXTURE_EXE").expect("SELFRELAY_FIXTURE_EXE must point at selfrelay-window-fixture.exe"));
     assert!(fixture.is_file(), "fixture executable missing: {}", fixture.display());
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     let control = std::env::temp_dir().join(format!("selfrelay-native-observer-{nonce}"));
     fs::create_dir_all(&control).unwrap();
 
+    let shell_icon = crate::icons::load(fixture.to_str(), &control.join("icon-cache"));
+    assert!(!shell_icon.fallback, "Windows Shell icon extraction fell back for real fixture executable");
+    assert_eq!(shell_icon.rgba.len(), (shell_icon.width * shell_icon.height * 4) as usize);
+
     let registry: WindowRegistry = Arc::new(Mutex::new(HashMap::new()));
     let paused = Arc::new(AtomicBool::new(false));
     let notify: ChangeNotifier = Arc::new(|| {});
     let observer = start(Arc::clone(&registry), paused, notify);
-    let mut child = Command::new(&fixture)
-        .arg("--control")
-        .arg(&control)
-        .spawn()
-        .expect("launch native fixture");
+    let mut child = Command::new(&fixture).arg("--control").arg(&control).spawn().expect("launch native fixture");
     let selected = HashSet::from([FIXTURE_APPLICATION_ID.to_string()]);
     let mut lifecycle = LifecycleState::default();
-    let mut report = Vec::new();
+    let mut report = vec!["Windows Shell executable icon extraction: PASS"];
 
     wait_phase(&control, "opened");
     wait_fixture_count(&registry, 1);
@@ -145,9 +133,7 @@ fn native_win32_fixture_sequence() {
     assert!(status.success(), "native fixture exited with {status}");
     observer.shutdown();
 
-    let report_path = std::env::var("SELFRELAY_FIXTURE_REPORT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| control.join("native-observer-result.txt"));
+    let report_path = std::env::var("SELFRELAY_FIXTURE_REPORT").map(PathBuf::from).unwrap_or_else(|_| control.join("native-observer-result.txt"));
     if let Some(parent) = report_path.parent() { fs::create_dir_all(parent).ok(); }
     fs::write(&report_path, format!("{}\n", report.join("\n"))).unwrap();
     println!("SelfRelay native Win32 observer fixture PASS\n{}", report.join("\n"));
