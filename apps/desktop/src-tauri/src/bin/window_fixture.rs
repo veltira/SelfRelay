@@ -9,9 +9,10 @@ mod windows_fixture {
             Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowTextW,
-                ShowWindow, UpdateWindow, CW_USEDEFAULT, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-                WINDOW_EX_STYLE, WNDCLASSW, WM_CLOSE, WM_DESTROY, WS_OVERLAPPEDWINDOW,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, GetMessageW, PostQuitMessage,
+                RegisterClassW, SetWindowTextW, ShowWindow, UpdateWindow, CW_USEDEFAULT, MSG,
+                SW_MINIMIZE, SW_RESTORE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW, WM_CLOSE,
+                WM_DESTROY, WS_OVERLAPPEDWINDOW,
             },
         },
     };
@@ -22,7 +23,10 @@ mod windows_fixture {
                 let _ = DestroyWindow(hwnd);
                 LRESULT(0)
             }
-            WM_DESTROY => LRESULT(0),
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
             _ => DefWindowProcW(hwnd, message, wparam, lparam),
         }
     }
@@ -74,20 +78,38 @@ mod windows_fixture {
         hwnd
     }
 
+    unsafe fn register_class(instance: HINSTANCE, class: &[u16]) {
+        let window_class = WNDCLASSW {
+            hInstance: instance,
+            lpfnWndProc: Some(wnd_proc),
+            lpszClassName: PCWSTR(class.as_ptr()),
+            ..Default::default()
+        };
+        if RegisterClassW(&window_class) == 0 {
+            panic!("fixture RegisterClassW failed");
+        }
+    }
+
+    unsafe fn run_legacy_upgrade(control: &Path, instance: HINSTANCE, class: &[u16]) {
+        let _window = create_window(class, "SelfRelay — v0.1.1", instance, CW_USEDEFAULT);
+        fs::create_dir_all(control).expect("legacy control directory");
+        fs::write(control.join("legacy-ready.txt"), "ready").expect("legacy ready write");
+        let mut message = MSG::default();
+        while GetMessageW(&mut message, None, 0, 0).as_bool() {}
+        fs::write(control.join("legacy-closed.txt"), "closed").expect("legacy closed write");
+    }
+
     pub fn run() {
         let control = control_dir();
         let class = wide("SelfRelayNativeObserverFixtureWindow");
         unsafe {
             let module = GetModuleHandleW(None).expect("fixture module handle");
             let instance = HINSTANCE(module.0);
-            let window_class = WNDCLASSW {
-                hInstance: instance,
-                lpfnWndProc: Some(wnd_proc),
-                lpszClassName: PCWSTR(class.as_ptr()),
-                ..Default::default()
-            };
-            if RegisterClassW(&window_class) == 0 {
-                panic!("fixture RegisterClassW failed");
+            register_class(instance, &class);
+
+            if std::env::args().any(|argument| argument == "--legacy-upgrade") {
+                run_legacy_upgrade(&control, instance, &class);
+                return;
             }
 
             let first = create_window(&class, "SelfRelay fixture — one", instance, CW_USEDEFAULT);
