@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SelfRelay",
+  "version": "0.2.2",
+  "identifier": "com.veltira.selfrelay",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SelfRelay",
+        "url": "index.html",
+        "width": 780,
+        "height": 620,
+        "minWidth": 680,
+        "minHeight": 520,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      },
+      {
+        "label": "capture",
+        "title": "SelfRelay — Guardar checkpoint",
+        "url": "index.html",
+        "width": 470,
+        "height": 510,
+        "minWidth": 430,
+        "minHeight": 430,
+        "center": true,
+        "resizable": false,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "recovery",
+        "title": "SelfRelay — Retomar",
+        "url": "index.html",
+        "width": 480,
+        "height": 520,
+        "minWidth": 440,
+        "minHeight": 440,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Veltira",
+    "shortDescription": "Volvé a tu trabajo con el contexto que dejaste.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "resources": ["resources/whisper/whisper-cli.exe", "resources/whisper/ggml-base-q5_1.bin"],
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-hooks.nsh",
+        "startMenuFolder": "SelfRelay"
+      }
+    }
+  }
+}
