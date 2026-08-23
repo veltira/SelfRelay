@@ -14,7 +14,7 @@ SIZES = (16, 24, 32, 48, 64, 128, 256)
 QA_SIZES = (16, 32, 48, 128, 256)
 
 
-def validate_pixels(image: Image.Image, label: str) -> Image.Image:
+def validate_pixels(image: Image.Image, label: str, *, require_inner_margin: bool = False) -> Image.Image:
     rgba = image.convert("RGBA")
     if rgba.width != rgba.height:
         raise RuntimeError(f"{label} must be square, got {rgba.width}x{rgba.height}")
@@ -31,9 +31,10 @@ def validate_pixels(image: Image.Image, label: str) -> Image.Image:
     bbox = alpha.getbbox()
     if bbox is None:
         raise RuntimeError(f"{label} contains no visible artwork")
-    left, top, right, bottom = bbox
-    if left <= 0 or top <= 0 or right >= rgba.width or bottom >= rgba.height:
-        raise RuntimeError(f"{label} artwork touches the canvas edge: {bbox}")
+    if require_inner_margin:
+        left, top, right, bottom = bbox
+        if left <= 0 or top <= 0 or right >= rgba.width or bottom >= rgba.height:
+            raise RuntimeError(f"{label} source artwork is clipped at the canvas edge: {bbox}")
 
     visible = sum(1 for value in alpha.getdata() if value > 12)
     if visible < max(8, rgba.width * rgba.height // 45):
@@ -41,7 +42,12 @@ def validate_pixels(image: Image.Image, label: str) -> Image.Image:
     return rgba
 
 
-def open_verified_png(path: Path, expected_size: int | None = None) -> Image.Image:
+def open_verified_png(
+    path: Path,
+    expected_size: int | None = None,
+    *,
+    require_inner_margin: bool = False,
+) -> Image.Image:
     if not path.is_file():
         raise RuntimeError(f"PNG missing: {path}")
 
@@ -52,7 +58,7 @@ def open_verified_png(path: Path, expected_size: int | None = None) -> Image.Ima
 
     with Image.open(path) as reopened:
         reopened.load()
-        rgba = validate_pixels(reopened, str(path))
+        rgba = validate_pixels(reopened, str(path), require_inner_margin=require_inner_margin)
 
     if expected_size is not None and rgba.size != (expected_size, expected_size):
         raise RuntimeError(f"{path} expected {expected_size}x{expected_size}, got {rgba.size}")
@@ -86,7 +92,7 @@ def verify_ico(path: Path) -> set[tuple[int, int]]:
 
 
 def main() -> None:
-    source = open_verified_png(SOURCE)
+    source = open_verified_png(SOURCE, require_inner_margin=True)
     if source.width < 128:
         raise RuntimeError(f"Desktop branding master is unexpectedly small: {source.size}")
 
@@ -133,6 +139,7 @@ def main() -> None:
         "source_verify=PASS\n"
         "source_rgba=PASS\n"
         "source_transparency=PASS\n"
+        "source_inner_margin=PASS\n"
         f"png_frames={','.join(str(size) for size in SIZES)}\n"
         f"ico_frames={','.join(str(size) for size in SIZES)}\n"
         "ico_decode_all_frames=PASS\n"
