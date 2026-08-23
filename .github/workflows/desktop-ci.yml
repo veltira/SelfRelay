@@ -10,7 +10,9 @@ on:
       - ".github/workflows/desktop-ci.yml"
       - "docs/DESKTOP_*"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "desktop/**"
     paths:
       - "apps/desktop/**"
       - ".github/workflows/desktop-ci.yml"
