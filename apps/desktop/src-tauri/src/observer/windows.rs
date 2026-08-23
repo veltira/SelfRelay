@@ -2,18 +2,17 @@ use super::{ChangeNotifier, ObserverCommand, ObserverHandle, WindowRegistry};
 use crate::{adapters::derive_context, classification::classify_window, model::{WindowMetadata, WindowRecord}};
 use crossbeam_channel::{bounded, select, unbounded, Sender};
 use std::{ffi::c_void, path::Path, sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex, OnceLock}, thread, time::{SystemTime, UNIX_EPOCH}};
-use windows::{core::PWSTR, Win32::{
+use ::windows::{core::PWSTR, Win32::{
     Foundation::{BOOL, CloseHandle, HWND, LPARAM},
     System::Threading::{GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
     UI::{
-        Accessibility::{
-            SetWinEventHook, UnhookWinEvent, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY,
-            EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW,
-            EVENT_SYSTEM_FOREGROUND, HWINEVENTHOOK, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
-        },
+        Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
         WindowsAndMessaging::{
             EnumWindows, GetAncestor, GetClassNameW, GetForegroundWindow, GetMessageW,
             GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GA_ROOT, MSG,
+            EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
+            EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND,
+            WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
         },
     },
 }};
@@ -178,7 +177,7 @@ fn reconcile_registry(registry: &WindowRegistry) {
 
 fn upsert_window(registry: &WindowRegistry, hwnd_value: isize) -> bool {
     let hwnd = HWND(hwnd_value as *mut c_void);
-    let Some(metadata) = inspect_window(hwnd) else {
+    let Some(metadata) = (unsafe { inspect_window(hwnd) }) else {
         return registry.lock().map(|mut map| map.remove(&hwnd_value).is_some()).unwrap_or(false);
     };
     if classify_window(&metadata).is_err() {
