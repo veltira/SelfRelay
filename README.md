@@ -6,15 +6,40 @@ SelfRelay ayuda a retomar una tarea interrumpida sin perder el contexto mental d
 
 Proyecto presentado a **CoderCup AI 2026**.
 
-> **Enlace único del proyecto para CoderCup:** esta misma página (`https://github.com/veltira/SelfRelay`). Desde aquí el jurado puede entender el proyecto, descargar la versión estable de Chrome o consultar la preview nativa para Windows. No hace falta entregar un enlace distinto por plataforma.
+> **Enlace único del proyecto para CoderCup:** esta misma página (`https://github.com/veltira/SelfRelay`). Desde aquí el jurado puede entender el proyecto, descargar la aplicación nativa para Windows o la extensión de Chrome y consultar las instrucciones de prueba. No hace falta entregar un enlace distinto por plataforma.
 
-## Ruta recomendada para evaluar SelfRelay
+## Windows — SelfRelay Desktop 0.2.3
 
-### Chrome — versión estable recomendada
+[**⬇ Descargar SelfRelay para Windows (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Windows-0.2.3.zip)
+
+[Descarga directa del instalador `.exe`](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Setup.exe)
+
+La aplicación de escritorio lleva el concepto de SelfRelay a aplicaciones nativas de Windows. Permite elegir qué aplicaciones seguir, detectar cuándo se abandona el último contexto de una aplicación, guardar un checkpoint en texto o audio y recuperarlo cuando el usuario vuelve.
+
+La versión **0.2.3** incluye:
+
+- selección y seguimiento de aplicaciones Win32 mediante ejecutable, accesos directos y discovery de Windows;
+- seguimiento de Google Chrome, Microsoft Edge, Firefox, Brave y otras aplicaciones elegidas por el usuario;
+- selección manual de `.exe` o `.lnk` cuando una aplicación no aparece automáticamente;
+- checkpoints durables almacenados en SQLite con identidad estable;
+- recuperación automática al volver al contexto seguido;
+- corrección del ciclo de vida de la ventana de recuperación para que una recuperación ya resuelta no deje una WebView vacía;
+- checkpoints de voz y reproducción del audio original;
+- **transcripción local con Whisper**, automática al recuperar una nota de voz y con reintento manual si hiciera falta;
+- transcripción fuera del hilo de interfaz para no bloquear la ventana mientras Whisper procesa el audio;
+- funcionamiento local sin cuentas, API keys ni servicios de IA pagos.
+
+El instalador 0.2.3 publicado fue construido e instalado por la validación de Windows en GitHub Actions. El pipeline comprobó frontend, Rust, captura multi-app, fixture Win32 real, Tauri, discovery, WebViews instaladas, upgrade desde 0.2.1, single-instance y desinstalación antes de publicar el artifact.
+
+SHA-256 del instalador público verificado:
+
+`0e5ac37d05e719df464928c1a9b2da9aed26c429deca39d541397bc67bb8d91c`
+
+La captura de escritorio utiliza una breve ventana de estabilización antes de considerar que una aplicación realmente terminó. Esa demora evita confundir recreaciones internas de ventanas con cierres reales.
+
+## Chrome — SelfRelay 0.4.3
 
 [**⬇ Descargar SelfRelay para Chrome (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Chrome.zip)
-
-**Versión 0.4.3 — validada y recomendada para la evaluación principal.**
 
 1. Descargar y extraer `SelfRelay-Chrome.zip`.
 2. Abrir `chrome://extensions`.
@@ -27,25 +52,9 @@ Proyecto presentado a **CoderCup AI 2026**.
 
 No requiere una cuenta, backend externo, API keys ni servicios de IA pagos.
 
-## Windows — preview nativa 0.2.2
-
-[**⬇ Descargar SelfRelay para Windows (.exe)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Setup.exe)
-
-La aplicación de escritorio demuestra la extensión del concepto de SelfRelay desde el navegador hacia aplicaciones nativas de Windows: observación del contexto, proceso residente en system tray, checkpoints de texto/audio, recuperación y transcripción local.
-
-**Estado:** preview funcional, no es la ruta recomendada para la evaluación principal. Durante las últimas pruebas físicas se detectaron incompatibilidades intermitentes que todavía están en investigación, entre ellas comportamiento no esperado al observar Google Chrome y bloqueos de inicio por algunos productos de seguridad en una build sin firma Authenticode.
-
-No desactives ni ignores una detección real de tu antivirus para ejecutar SelfRelay. Si el software de seguridad impide abrir la preview, utilizá la versión estable de Chrome para evaluar el flujo principal.
-
-El instalador publicado corresponde exactamente a la build 0.2.2 probada físicamente. SHA-256:
-
-`a12061a72981cfedfa33e723cb10d4abf668c289b4b74026e3009ccea31df0ce`
-
-La captura de escritorio utiliza una breve ventana de estabilización antes de considerar que una aplicación realmente terminó; por eso el aviso de checkpoint puede aparecer con una pequeña demora. Esa espera evita confundir recreaciones internas de ventanas con cierres reales.
-
 También se pueden consultar todos los archivos publicados en la [Release de CoderCup 2026](https://github.com/veltira/SelfRelay/releases/tag/codercup-2026).
 
-> Los evaluadores no necesitan descargar el ZIP del código fuente de GitHub ni compilar el proyecto.
+> Los evaluadores no necesitan descargar el código fuente ni compilar el proyecto.
 
 ## Para el jurado de CoderCup
 
@@ -59,22 +68,26 @@ El flujo principal es:
 
 ## Privacidad y transcripción local
 
-Los checkpoints se almacenan localmente. El audio permanece en el dispositivo y la transcripción se ejecuta de forma explícita y bajo demanda mediante un runtime local de Whisper, sin enviar el audio a una API remota de transcripción.
+Los checkpoints se almacenan localmente. El audio permanece en el dispositivo y la transcripción se ejecuta mediante un runtime local de Whisper incluido con SelfRelay. En Desktop 0.2.3, una nota de voz pendiente intenta transcribirse automáticamente durante la recuperación y conserva una acción de reintento manual.
+
+SelfRelay no envía el audio a una API remota de transcripción y no necesita tokens de un proveedor de IA.
 
 ## Sobre Windows SmartScreen y antivirus
 
-La preview de Windows todavía no utiliza un certificado comercial de firma Authenticode. Microsoft Defender SmartScreen puede mostrar mensajes como **“Editor desconocido”** o **“Windows protegió su PC”** por la falta de reputación o firma del archivo. Ese aviso, por sí solo, no equivale a una detección de malware.
+El instalador de Windows todavía no utiliza un certificado comercial de firma Authenticode. Microsoft Defender SmartScreen o el navegador pueden advertir que se trata de una aplicación o descarga no reconocida porque un binario sin firma no dispone de una identidad de editor con reputación transferible entre versiones.
 
-Algunos productos de seguridad también pueden restringir una aplicación no firmada que observa eventos de ventanas de Windows. SelfRelay no debe requerir que un evaluador desactive su antivirus; por eso la extensión de Chrome es la ruta estable recomendada para esta entrega.
+Por ese motivo se ofrece como descarga principal un ZIP y se publica el SHA-256 exacto del instalador. El ZIP no sustituye una firma de código: al ejecutar el `.exe`, Windows todavía puede mostrar una advertencia de aplicación no reconocida.
+
+Una advertencia de reputación o **“Editor desconocido”** no es, por sí sola, una detección de malware. Si un producto de seguridad identifica explícitamente una amenaza concreta en lugar de una advertencia de reputación/firma, no se recomienda ignorar esa detección.
 
 ## Qué hay dentro del repositorio
 
-- `apps/extension` — extensión de Chrome estable para la entrega.
-- `apps/desktop` — preview nativa para Windows, frontend y núcleo Tauri/Rust.
+- `apps/extension` — extensión de Chrome.
+- `apps/desktop` — aplicación nativa para Windows, frontend y núcleo Tauri/Rust.
 - `packages/shared` — modelos y semántica compartida de contextos y checkpoints.
 - `docs` — documentación de comportamiento, distribución y validación.
 - `.github/workflows` — pruebas y empaquetado reproducible.
 
 ## Desarrollo y validación
 
-SelfRelay incluye pruebas automáticas para captura, recuperación, persistencia, audio, transcripción local y lifecycle. La preview de escritorio también incluye validaciones de instalación, upgrade, single-instance, WebView y comportamiento nativo de Windows. La build 0.2.2 sigue disponible para demostrar el alcance Desktop, mientras continúan las correcciones de compatibilidad detectadas en pruebas físicas.
+SelfRelay incluye pruebas automáticas para captura, recuperación, persistencia, audio, transcripción local y lifecycle. Desktop 0.2.3 añade validaciones de Windows para discovery de aplicaciones, observador Win32, instalación real, WebViews, upgrade, single-instance y desinstalación. El estado de los assets públicos verificados queda registrado en `docs/CODERCUP_RELEASE_STATUS.md`.
