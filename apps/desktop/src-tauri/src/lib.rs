@@ -5,11 +5,13 @@ mod capture_store;
 mod checkpoints;
 mod classification;
 mod discovery;
+mod discovery_quality;
 mod icons;
 mod identity;
 mod lifecycle;
 mod model;
 mod observer;
+mod runtime_smoke;
 mod storage;
 mod transcription;
 
@@ -28,9 +30,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use storage::{CheckpointRecord, TrackedApplication, WorksetRecord};
 use tauri::{
@@ -39,9 +42,10 @@ use tauri::{
     Emitter, Manager, State, WindowEvent,
 };
 
-const PRODUCT_VERSION: &str = "0.2.1";
+const PRODUCT_VERSION: &str = "0.2.2";
 static AUDIO_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static WORKSET_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static SURFACE_WATCHDOGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 struct DesktopState {
     registry: WindowRegistry,
@@ -55,6 +59,7 @@ struct DesktopState {
     capture: Arc<CaptureCoordinator>,
     recovery_queue: Arc<Mutex<VecDeque<RecoveryTarget>>>,
     active_worksets: Arc<Mutex<HashSet<String>>>,
+    surface_ready: Mutex<HashMap<String, String>>,
 }
 
 impl DesktopState {
@@ -138,6 +143,7 @@ struct RecoveryView {
     context_id: String,
     context_label: String,
     workset_id: Option<String>,
+    ready_token: String,
     checkpoints: Vec<CheckpointRecord>,
 }
 
@@ -216,7 +222,13 @@ fn synchronize_active_worksets(
     Ok(())
 }
 
-fn show_surface(app: &tauri::AppHandle, label: &str) {
+fn hide_surface(app: &tauri::AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.hide();
+    }
+}
+
+fn force_show_surface(app: &tauri::AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -224,9 +236,94 @@ fn show_surface(app: &tauri::AppHandle, label: &str) {
     }
 }
 
-fn hide_surface(app: &tauri::AppHandle, label: &str) {
-    if let Some(window) = app.get_webview_window(label) {
-        let _ = window.hide();
+fn expected_surface_token(state: &DesktopState, label: &str) -> Option<String> {
+    match label {
+        "capture" => state.capture.current().ok().flatten().map(|capture| capture.id),
+        "recovery" => state
+            .recovery_queue
+            .lock()
+            .ok()
+            .and_then(|queue| queue.front().map(|target| target.key.clone())),
+        _ => None,
+    }
+}
+
+fn surface_token_ready(state: &DesktopState, label: &str, expected: &str) -> bool {
+    state
+        .surface_ready
+        .lock()
+        .ok()
+        .and_then(|ready| ready.get(label).cloned())
+        .as_deref()
+        == Some(expected)
+}
+
+fn schedule_surface_watchdog(app: &tauri::AppHandle, label: &str, expected: &str) {
+    let key = format!("{label}:{expected}");
+    let watchdogs = SURFACE_WATCHDOGS.get_or_init(|| Mutex::new(HashSet::new()));
+    if !watchdogs.lock().map(|mut current| current.insert(key.clone())).unwrap_or(false) {
+        return;
+    }
+    let app = app.clone();
+    let label = label.to_string();
+    let expected = expected.to_string();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(4));
+        let still_waiting = {
+            let state = app.state::<DesktopState>();
+            expected_surface_token(&state, &label).as_deref() == Some(expected.as_str())
+                && !surface_token_ready(&state, &label, &expected)
+        };
+        if still_waiting {
+            let state = app.state::<DesktopState>();
+            state.capture.diagnostic(
+                "surface_ready_timeout_reload",
+                &format!("surface={label} expected={expected}"),
+                now_ms(),
+            );
+            hide_surface(&app, &label);
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.eval("window.location.reload()");
+            }
+            let _ = app.emit("desktop://state-changed", ());
+            thread::sleep(Duration::from_secs(4));
+            let state = app.state::<DesktopState>();
+            if expected_surface_token(&state, &label).as_deref() == Some(expected.as_str())
+                && !surface_token_ready(&state, &label, &expected)
+            {
+                state.capture.diagnostic(
+                    "surface_ready_timeout_after_reload",
+                    &format!("surface={label} expected={expected}"),
+                    now_ms(),
+                );
+                hide_surface(&app, &label);
+            }
+        }
+        if let Some(watchdogs) = SURFACE_WATCHDOGS.get() {
+            if let Ok(mut current) = watchdogs.lock() {
+                current.remove(&key);
+            }
+        }
+    });
+}
+
+fn show_surface(app: &tauri::AppHandle, label: &str) {
+    if !matches!(label, "capture" | "recovery") {
+        force_show_surface(app, label);
+        return;
+    }
+    let state = app.state::<DesktopState>();
+    let Some(expected) = expected_surface_token(&state, label) else {
+        hide_surface(app, label);
+        return;
+    };
+    if surface_token_ready(&state, label, &expected) {
+        force_show_surface(app, label);
+    } else {
+        // A native HWND/WebView existing is not enough. It stays hidden until the
+        // real React surface has fetched and rendered the exact durable target.
+        hide_surface(app, label);
+        schedule_surface_watchdog(app, label, &expected);
     }
 }
 
@@ -380,7 +477,7 @@ fn process_registry_change(
 
 #[tauri::command]
 fn get_discovered_applications(state: State<'_, DesktopState>) -> Vec<DiscoveredApplication> {
-    discovery::discover(&registry_records(&state.registry))
+    discovery_quality::filter(discovery::discover(&registry_records(&state.registry)))
 }
 
 #[tauri::command]
@@ -514,6 +611,66 @@ fn get_pending_capture(
     }
 }
 
+fn maybe_exit_runtime_smoke(app: &tauri::AppHandle, finished: bool) {
+    if !finished {
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(150));
+        app.exit(0);
+    });
+}
+
+#[tauri::command]
+fn capture_surface_ready(
+    capture_id: String,
+    state: State<'_, DesktopState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let current = state
+        .capture
+        .current()?
+        .ok_or_else(|| "La superficie de captura reportó ready sin una captura pendiente.".to_string())?;
+    if current.id != capture_id {
+        state.capture.diagnostic(
+            "capture_ready_id_mismatch",
+            &format!("current={} reported={capture_id}", current.id),
+            now_ms(),
+        );
+        hide_surface(&app, "capture");
+        return Err("La captura renderizada ya no coincide con el checkpoint pendiente.".into());
+    }
+    state
+        .surface_ready
+        .lock()
+        .map_err(|_| "surface readiness lock poisoned".to_string())?
+        .insert("capture".into(), capture_id.clone());
+    let finished = runtime_smoke::mark_capture_ready(&capture_id)?;
+    show_surface(&app, "capture");
+    maybe_exit_runtime_smoke(&app, finished);
+    Ok(())
+}
+
+#[tauri::command]
+fn report_surface_error(
+    surface: String,
+    detail: String,
+    state: State<'_, DesktopState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    if !matches!(surface.as_str(), "capture" | "recovery") {
+        return Err("Unknown SelfRelay surface.".into());
+    }
+    state.capture.diagnostic(
+        "surface_frontend_error",
+        &format!("surface={surface} detail={detail}"),
+        now_ms(),
+    );
+    hide_surface(&app, &surface);
+    Ok(())
+}
+
 fn advance_capture_surface(app: &tauri::AppHandle, next: Option<PendingCapture>) {
     if next.is_some() {
         show_surface(app, "capture");
@@ -639,6 +796,7 @@ fn get_active_recovery(state: State<'_, DesktopState>) -> Result<Option<Recovery
             queue.pop_front();
             continue;
         }
+        let ready_token = target.key.clone();
         return Ok(Some(match target.kind {
             RecoveryTargetKind::Context(context) => RecoveryView {
                 target_kind: "context",
@@ -648,6 +806,7 @@ fn get_active_recovery(state: State<'_, DesktopState>) -> Result<Option<Recovery
                 context_id: context.context_id,
                 context_label: context.context_label,
                 workset_id: None,
+                ready_token,
                 checkpoints,
             },
             RecoveryTargetKind::Workset { id, name, source } => RecoveryView {
@@ -658,10 +817,59 @@ fn get_active_recovery(state: State<'_, DesktopState>) -> Result<Option<Recovery
                 context_id: source.context_id,
                 context_label: source.context_label,
                 workset_id: Some(id),
+                ready_token,
                 checkpoints,
             },
         }));
     }
+}
+
+#[tauri::command]
+fn recovery_surface_ready(
+    ready_token: String,
+    checkpoint_ids: Vec<i64>,
+    state: State<'_, DesktopState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let target = state
+        .recovery_queue
+        .lock()
+        .map_err(|_| "recovery lock poisoned".to_string())?
+        .front()
+        .cloned()
+        .ok_or_else(|| "La superficie de recuperación reportó ready sin una recuperación pendiente.".to_string())?;
+    if target.key != ready_token {
+        state.capture.diagnostic(
+            "recovery_ready_token_mismatch",
+            &format!("current={} reported={ready_token}", target.key),
+            now_ms(),
+        );
+        hide_surface(&app, "recovery");
+        return Err("La recuperación renderizada ya no coincide con el contexto activo.".into());
+    }
+    let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
+    let current_ids = checkpoints_for_target(&connection, &target)?
+        .into_iter()
+        .map(|checkpoint| checkpoint.id)
+        .collect::<Vec<_>>();
+    if current_ids != checkpoint_ids {
+        state.capture.diagnostic(
+            "recovery_ready_checkpoint_mismatch",
+            &format!("current={current_ids:?} reported={checkpoint_ids:?}"),
+            now_ms(),
+        );
+        hide_surface(&app, "recovery");
+        return Err("Los checkpoints renderizados ya no coinciden con la recuperación actual.".into());
+    }
+    state
+        .surface_ready
+        .lock()
+        .map_err(|_| "surface readiness lock poisoned".to_string())?
+        .insert("recovery".into(), ready_token.clone());
+    let finished = runtime_smoke::mark_recovery_ready(&ready_token, &checkpoint_ids)?;
+    show_surface(&app, "recovery");
+    maybe_exit_runtime_smoke(&app, finished);
+    Ok(())
 }
 
 #[tauri::command]
@@ -909,12 +1117,29 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-fn version_probe_from_args() -> Option<PathBuf> {
+fn argument_path(flag: &str) -> Option<PathBuf> {
     let arguments = std::env::args().collect::<Vec<_>>();
     arguments
         .windows(2)
-        .find(|pair| pair[0] == "--selfrelay-version-file")
+        .find(|pair| pair[0] == flag)
         .map(|pair| PathBuf::from(&pair[1]))
+}
+
+fn version_probe_from_args() -> Option<PathBuf> {
+    argument_path("--selfrelay-version-file")
+}
+
+fn discovery_probe_from_args() -> Option<PathBuf> {
+    argument_path("--selfrelay-discovery-report")
+}
+
+fn run_discovery_probe(path: &Path) -> Result<(), String> {
+    let applications = discovery_quality::filter(discovery::discover(&[]));
+    discovery_quality::assert_quality(&applications)?;
+    let parent = path.parent().ok_or_else(|| "Discovery report path has no parent.".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let json = serde_json::to_string_pretty(&applications).map_err(|error| error.to_string())?;
+    fs::write(path, json).map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -923,12 +1148,23 @@ pub fn run() {
         let _ = fs::write(path, PRODUCT_VERSION);
         return;
     }
+    if let Some(path) = discovery_probe_from_args() {
+        if let Err(error) = run_discovery_probe(&path) {
+            eprintln!("SelfRelay discovery QA failed: {error}");
+            std::process::exit(2);
+        }
+        return;
+    }
     let started_by_autostart = std::env::args().any(|argument| argument == "--autostart");
+    let runtime_smoke_dir = runtime_smoke::dir_from_args();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_surface(app, "main")))
         .setup(move |app| {
-            let data_dir = app.path().app_local_data_dir()?;
+            let data_dir = runtime_smoke_dir
+                .as_ref()
+                .map(|directory| directory.join("data"))
+                .unwrap_or(app.path().app_local_data_dir()?);
             fs::create_dir_all(&data_dir)?;
             fs::create_dir_all(data_dir.join("audio"))?;
             let db_path = data_dir.join("selfrelay.db");
@@ -947,6 +1183,45 @@ pub fn run() {
             let capture = Arc::new(CaptureCoordinator::new(&db_path));
             let recovery_queue = Arc::new(Mutex::new(VecDeque::new()));
             let active_worksets = Arc::new(Mutex::new(HashSet::new()));
+
+            if let Some(report_dir) = runtime_smoke_dir.as_ref() {
+                let snapshot = ContextSnapshot {
+                    application_id: "qa:webview-app".into(),
+                    application_name: "SelfRelay WebView Fixture".into(),
+                    context_id: "qa:webview-context".into(),
+                    context_label: "SelfRelay WebView Fixture".into(),
+                };
+                let pending = capture
+                    .enqueue(&snapshot, now_ms())
+                    .map_err(std::io::Error::other)?;
+                let connection = storage::open(&db_path)?;
+                let checkpoint = storage::insert_checkpoint(
+                    &connection,
+                    &snapshot.application_id,
+                    &snapshot.application_name,
+                    &snapshot.context_id,
+                    &snapshot.context_label,
+                    None,
+                    "installed WebView recovery fixture",
+                    None,
+                    now_ms(),
+                )?;
+                let recovery_token = format!("context:{}", snapshot.context_id);
+                recovery_queue
+                    .lock()
+                    .map_err(|_| std::io::Error::other("recovery smoke lock poisoned"))?
+                    .push_back(RecoveryTarget {
+                        key: recovery_token.clone(),
+                        kind: RecoveryTargetKind::Context(snapshot),
+                    });
+                runtime_smoke::configure(
+                    report_dir.clone(),
+                    pending.id,
+                    recovery_token,
+                    vec![checkpoint.id],
+                )
+                .map_err(std::io::Error::other)?;
+            }
 
             let app_handle = app.handle().clone();
             let notify_registry = Arc::clone(&registry);
@@ -981,13 +1256,21 @@ pub fn run() {
                 capture,
                 recovery_queue,
                 active_worksets,
+                surface_ready: Mutex::new(HashMap::new()),
             });
-            setup_tray(app)?;
-            if started_by_autostart {
+            if runtime_smoke::active() {
                 hide_surface(app.handle(), "main");
-            }
-            if startup_capture {
                 show_surface(app.handle(), "capture");
+                show_surface(app.handle(), "recovery");
+                let _ = app.emit("desktop://state-changed", ());
+            } else {
+                setup_tray(app)?;
+                if started_by_autostart {
+                    hide_surface(app.handle(), "main");
+                }
+                if startup_capture {
+                    show_surface(app.handle(), "capture");
+                }
             }
             Ok(())
         })
@@ -1003,12 +1286,9 @@ pub fn run() {
                         let _ = window.hide();
                     }
                     "capture" => {
-                        // A capture is durable and remains bound until the explicit
-                        // Guardar / No guardar action consumes that exact ID.
                         api.prevent_close();
                         if state.capture.current().ok().flatten().is_some() {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                            show_surface(window.app_handle(), "capture");
                         } else {
                             state.capture.diagnostic("capture_close_without_pending", "close requested while no durable capture existed", now_ms());
                             let _ = window.hide();
@@ -1035,10 +1315,13 @@ pub fn run() {
             set_application_tracking,
             pick_application_executable,
             get_pending_capture,
+            capture_surface_ready,
+            report_surface_error,
             dismiss_capture,
             save_checkpoint,
             save_checkpoint_now,
             get_active_recovery,
+            recovery_surface_ready,
             defer_recovery,
             resolve_checkpoint,
             get_checkpoint_audio,
@@ -1073,6 +1356,6 @@ mod tests {
 
     #[test]
     fn product_version_is_complete_candidate_line() {
-        assert_eq!(PRODUCT_VERSION, "0.2.1");
+        assert_eq!(PRODUCT_VERSION, "0.2.2");
     }
 }
