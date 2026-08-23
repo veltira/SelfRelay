@@ -1,0 +1,51 @@
+name: Publish CoderCup Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-codercup-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: codercup-2026
+  INSTALLER_SHA256: a12061a72981cfedfa33e723cb10d4abf668c289b4b74026e3009ccea31df0ce
+  VALIDATED_ARTIFACT_ID: '9492871315'
+
+jobs:
+  publish-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download physically validated Windows artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${VALIDATED_ARTIFACT_ID}/zip" \
+            > windows-artifact.zip
+          unzip -q windows-artifact.zip -d windows-artifact
+          test -f windows-artifact/dist/SelfRelay-Setup.exe
+          test -f windows-artifact/dist/desktop-package-metadata.txt
+
+      - name: Verify exact installer tested by the user
+        run: |
+          echo "${INSTALLER_SHA256}  windows-artifact/dist/SelfRelay-Setup.exe" | sha256sum --check --strict
+
+      - name: Publish Windows installer to CoderCup Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title 'SelfRelay — CoderCup 2026' \
+              --notes 'Builds de SelfRelay preparadas para evaluación de CoderCup AI 2026.'
+          fi
+          gh release upload "${RELEASE_TAG}" \
+            windows-artifact/dist/SelfRelay-Setup.exe \
+            windows-artifact/dist/desktop-package-metadata.txt \
+            --clobber
