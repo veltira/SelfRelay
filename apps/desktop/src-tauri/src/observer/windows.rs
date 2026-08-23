@@ -2,8 +2,8 @@ use super::{ChangeNotifier, ObserverCommand, ObserverHandle, WindowRegistry};
 use crate::{adapters::derive_context, classification::classify_window, model::{WindowMetadata, WindowRecord}};
 use crossbeam_channel::{bounded, select, unbounded, Sender};
 use std::{ffi::c_void, path::Path, sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex, OnceLock}, thread, time::{SystemTime, UNIX_EPOCH}};
-use ::windows::{core::PWSTR, Win32::{
-    Foundation::{BOOL, CloseHandle, HWND, LPARAM},
+use ::windows::{core::{BOOL, PWSTR}, Win32::{
+    Foundation::{CloseHandle, HWND, LPARAM},
     System::Threading::{GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
     UI::{
         Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
