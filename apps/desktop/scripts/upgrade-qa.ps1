@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Version = "0.2.2"
+$Version = "0.2.3"
 $Control = Join-Path $env:RUNNER_TEMP "selfrelay-upgrade-qa"
 $LegacyDir = Join-Path $Control "legacy-0.2.1-install"
 $LegacyExe = Join-Path $LegacyDir "SelfRelay.exe"
@@ -63,9 +63,9 @@ while (-not (Test-Path (Join-Path $Control "legacy-ready.txt"))) {
 if ($Legacy.HasExited) { throw "0.2.1 SelfRelay exited before upgrade began" }
 
 $Install = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru -Wait
-if ($Install.ExitCode -ne 0) { throw "0.2.2 silent install failed with $($Install.ExitCode)" }
+if ($Install.ExitCode -ne 0) { throw "0.2.3 silent install failed with $($Install.ExitCode)" }
 $Legacy.Refresh()
-if (-not $Legacy.HasExited) { throw "0.2.2 installer left the old SelfRelay.exe process running" }
+if (-not $Legacy.HasExited) { throw "0.2.3 installer left the old SelfRelay.exe process running" }
 if (-not (Test-Path (Join-Path $Control "legacy-closed.txt"))) { throw "Old process did not leave through its native message loop" }
 
 $Candidates = Get-ChildItem $env:LOCALAPPDATA -Filter "SelfRelay.exe" -File -Recurse -ErrorAction SilentlyContinue |
@@ -81,7 +81,7 @@ function Get-PESubsystem([string]$Path) {
 $InstalledSubsystem = Get-PESubsystem $NewExe.FullName
 if ($InstalledSubsystem -ne 2) { throw "Installed SelfRelay.exe is not Windows GUI subsystem: $InstalledSubsystem" }
 
-# Real 0.2.2 startup must preserve the exact 0.2.1 selection, settings,
+# Real 0.2.3 startup must preserve the exact 0.2.1 selection, settings,
 # workset, checkpoint and durable pending-capture row.
 $NewProcess = Start-Process -FilePath $NewExe.FullName -PassThru
 $Deadline = (Get-Date).AddSeconds(20); $MigrationOk = $false
@@ -103,7 +103,7 @@ raise SystemExit(0 if ok else 2)
   if ($LASTEXITCODE -eq 0) { $MigrationOk = $true; break }
   Start-Sleep -Milliseconds 250
 }
-if (-not $MigrationOk) { throw "0.2.2 did not preserve 0.2.1 selections, settings, worksets, checkpoint and pending-capture data" }
+if (-not $MigrationOk) { throw "0.2.3 did not preserve 0.2.1 selections, settings, worksets, checkpoint and pending-capture data" }
 if ($NewProcess.HasExited) { throw "Installed SelfRelay.exe terminated unexpectedly after launch" }
 
 $Before = @(Get-Process -Name "SelfRelay" -ErrorAction SilentlyContinue).Count

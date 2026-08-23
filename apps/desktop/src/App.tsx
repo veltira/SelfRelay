@@ -7,7 +7,7 @@ import type {
   RecoveryView, SettingsView, TrackedApplication, WorksetView,
 } from "./types";
 
-const PRODUCT_VERSION = "0.2.1";
+const PRODUCT_VERSION = "0.2.3";
 const iconCache = new Map<string, string>();
 type MainSection = "apps" | "worksets" | "history" | "settings";
 
