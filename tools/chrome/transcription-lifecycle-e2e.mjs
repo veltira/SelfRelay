@@ -29,7 +29,13 @@ async function waitForServiceWorker(extensionId=''){
 }
 
 async function openPopup(extensionId){
-  const page=await context.newPage();await page.goto(`chrome-extension://${extensionId}/popup.html`);await page.waitForLoadState('domcontentloaded');await page.waitForFunction(()=>Boolean(globalThis.chrome?.runtime?.id),null,{timeout:10000});return page;
+  const url=`chrome-extension://${extensionId}/popup.html`;let lastError=null;
+  for(let attempt=0;attempt<30;attempt++){
+    const page=await context.newPage();
+    try{await page.goto(url,{waitUntil:'domcontentloaded',timeout:5000});await page.waitForFunction(()=>Boolean(globalThis.chrome?.runtime?.id),null,{timeout:5000});return page;}
+    catch(error){lastError=error;await page.close().catch(()=>{});const message=String(error?.message||error);if(!/ERR_BLOCKED_BY_CLIENT|ERR_FAILED|Target page, context or browser has been closed/i.test(message))throw error;await new Promise(resolveDelay=>setTimeout(resolveDelay,500));}
+  }
+  throw lastError||new Error('extension_popup_not_ready_after_reload');
 }
 
 async function resetState(page){await page.evaluate(async()=>{await chrome.storage.local.clear();await chrome.storage.session.clear();const indexedDBApi=globalThis.indexedDB;if(indexedDBApi?.databases){for(const db of await indexedDBApi.databases())if(db.name)await new Promise(resolveDelete=>{const request=indexedDBApi.deleteDatabase(db.name);request.onsuccess=request.onerror=request.onblocked=()=>resolveDelete();});}});}
@@ -71,7 +77,7 @@ try{
   if(first.transcript.length<8||second.transcript.length<8)throw new Error(`same_session_transcript_too_short:${JSON.stringify({first,second})}`);
   console.log(`Same-session transcript A: ${first.transcript}`);console.log(`Same-session transcript B: ${second.transcript}`);console.log(`chrome://extensions before reload: ${JSON.stringify(beforeReload)}`);
 
-  const oldWorker=serviceWorker;try{await popup.evaluate(()=>chrome.runtime.reload());}catch{}await popup.close().catch(()=>{});await oldWorker.waitForEvent('close',{timeout:15000}).catch(()=>{});await new Promise(resolveDelay=>setTimeout(resolveDelay,600));popup=await openPopup(extensionId);serviceWorker=await waitForServiceWorker(extensionId);
+  const oldWorker=serviceWorker;try{await popup.evaluate(()=>chrome.runtime.reload());}catch{}await popup.close().catch(()=>{});await oldWorker.waitForEvent('close',{timeout:15000}).catch(()=>{});popup=await openPopup(extensionId);serviceWorker=await waitForServiceWorker(extensionId);
   const afterReload=await transcribeThroughRecovery(popup,{key:'reload',url:workUrl('reload')});const afterReloadExtensions=await inspectExtensionsPage(extensionId);if(afterReload.transcript.length<8)throw new Error(`reload_transcript_too_short:${JSON.stringify(afterReload)}`);
   console.log(`Post-reload transcript: ${afterReload.transcript}`);console.log(`chrome://extensions after reload: ${JSON.stringify(afterReloadExtensions)}`);
 
