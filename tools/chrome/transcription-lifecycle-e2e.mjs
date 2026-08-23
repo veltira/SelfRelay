@@ -85,7 +85,7 @@ try{
 
   const oldWorker=serviceWorker;await popup.close().catch(()=>{});const reloadState=await reloadThroughExtensionsPage(extensionId);await oldWorker.waitForEvent('close',{timeout:15000}).catch(()=>{});serviceWorker=await waitForServiceWorker(extensionId);popup=await openPopup(extensionId);console.log(`chrome://extensions reload action: ${JSON.stringify(reloadState)}`);
   const afterReload=await transcribeThroughRecovery(popup,{key:'reload',url:workUrl('reload')});const afterReloadExtensions=await inspectExtensionsPage(extensionId);if(afterReload.transcript.length<8)throw new Error(`reload_transcript_too_short:${JSON.stringify(afterReload)}`);
-  console.log(`Post-reload transcript: ${afterReload.transcript}`);console.log(`chrome://extensions after reload: ${JSON.stringify(afterReloadExtensions)}`);
+  console.log(`Post-reload transcript C: ${afterReload.transcript}`);console.log(`chrome://extensions after reload: ${JSON.stringify(afterReloadExtensions)}`);
 
   const extensionOwned=unexpected.filter(item=>String(item.page||'').startsWith(`chrome-extension://${extensionId}/`)||String(item.text||'').includes(extensionId)||/selfrelay-whisper|pthread|sharedarraybuffer|wasm/i.test(String(item.text||'')));
   if(extensionOwned.length)throw new Error(`selfrelay_unexpected_runtime_errors:${JSON.stringify(extensionOwned)}`);
