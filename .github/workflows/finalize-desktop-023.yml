@@ -1,0 +1,112 @@
+name: Finalize Desktop 0.2.3
+
+on:
+  push:
+    branches:
+      - fix/desktop-app-selection
+    paths:
+      - ".github/workflows/finalize-desktop-023.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/desktop-app-selection
+      - name: Patch recovery lifecycle, async Whisper and version
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          lib_path = Path('apps/desktop/src-tauri/src/lib.rs')
+          text = lib_path.read_text(encoding='utf-8')
+
+          marker = 'fn schedule_surface_watchdog(app: &tauri::AppHandle, label: &str, expected: &str) {'
+          helper = '''fn clear_surface_ready(state: &DesktopState, label: &str) {\n    if let Ok(mut ready) = state.surface_ready.lock() {\n        ready.remove(label);\n    }\n}\n\n'''
+          if 'fn clear_surface_ready(' not in text:
+              if marker not in text:
+                  raise SystemExit('schedule_surface_watchdog marker not found')
+              text = text.replace(marker, helper + marker, 1)
+
+          old_sig = "fn get_active_recovery(state: State<'_, DesktopState>) -> Result<Option<RecoveryView>, String> {"
+          new_sig = "fn get_active_recovery(state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<Option<RecoveryView>, String> {"
+          if old_sig in text:
+              text = text.replace(old_sig, new_sig, 1)
+          elif new_sig not in text:
+              raise SystemExit('get_active_recovery signature not found')
+
+          old_empty = '        let Some(target) = queue.front().cloned() else { return Ok(None); };'
+          new_empty = '''        let Some(target) = queue.front().cloned() else {\n            clear_surface_ready(&state, "recovery");\n            hide_surface(&app, "recovery");\n            return Ok(None);\n        };'''
+          if old_empty in text:
+              text = text.replace(old_empty, new_empty, 1)
+          elif new_empty not in text:
+              raise SystemExit('empty recovery branch not found')
+
+          needle = '    drop(queue);\n    if has_more { show_surface(&app, "recovery"); } else { hide_surface(&app, "recovery"); }'
+          replacement = '    drop(queue);\n    clear_surface_ready(&state, "recovery");\n    if has_more { show_surface(&app, "recovery"); } else { hide_surface(&app, "recovery"); }'
+          count = text.count(needle)
+          if count:
+              text = text.replace(needle, replacement)
+          elif text.count(replacement) < 2:
+              raise SystemExit('recovery queue advance markers not found')
+
+          close_old = '''                    "recovery" => {\n                        api.prevent_close();\n                        if let Ok(mut queue) = state.recovery_queue.lock() {\n                            queue.pop_front();\n                        }\n                        let _ = window.hide();'''
+          close_new = '''                    "recovery" => {\n                        api.prevent_close();\n                        if let Ok(mut queue) = state.recovery_queue.lock() {\n                            queue.pop_front();\n                        }\n                        clear_surface_ready(&state, "recovery");\n                        let _ = window.hide();'''
+          if close_old in text:
+              text = text.replace(close_old, close_new, 1)
+          elif close_new not in text:
+              raise SystemExit('recovery close branch not found')
+
+          pattern = re.compile(r'''#\[tauri::command\]\nfn transcribe_checkpoint\(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle\) -> Result<String, String> \{.*?\n\}\n\n#\[tauri::command\]\nfn get_checkpoint_history''', re.S)
+          async_fn = '''#[tauri::command]\nasync fn transcribe_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<String, String> {\n    let db_path = state.db_path.clone();\n    let resource_dir = state.resource_dir.clone();\n    let work_dir = state.data_dir.join("transcription-temp");\n    let connection = storage::open(&db_path).map_err(|error| error.to_string())?;\n    let checkpoint = storage::checkpoint_by_id(&connection, id)\n        .map_err(|error| error.to_string())?\n        .ok_or_else(|| "Checkpoint no encontrado.".to_string())?;\n    if let Some(existing) = checkpoint.transcript.filter(|value| !value.trim().is_empty()) {\n        return Ok(existing);\n    }\n    let audio_path = checkpoint.audio_path.map(PathBuf::from)\n        .ok_or_else(|| "Este checkpoint no tiene audio para transcribir.".to_string())?;\n    drop(connection);\n    drop(state);\n\n    let transcript = tauri::async_runtime::spawn_blocking(move || {\n        transcription::transcribe(&audio_path, &resource_dir, &work_dir)\n    })\n    .await\n    .map_err(|error| format!("El proceso local de transcripción no pudo completarse: {error}"))??;\n\n    let connection = storage::open(&db_path).map_err(|error| error.to_string())?;\n    storage::set_checkpoint_transcript(&connection, id, &transcript)\n        .map_err(|error| error.to_string())?;\n    let _ = app.emit("desktop://state-changed", ());\n    Ok(transcript)\n}\n\n#[tauri::command]\nfn get_checkpoint_history'''
+          if 'async fn transcribe_checkpoint' not in text:
+              text, changed = pattern.subn(async_fn, text, count=1)
+              if changed != 1:
+                  raise SystemExit('transcribe_checkpoint body not found')
+
+          text = text.replace('const PRODUCT_VERSION: &str = "0.2.2";', 'const PRODUCT_VERSION: &str = "0.2.3";')
+          text = text.replace('assert_eq!(PRODUCT_VERSION, "0.2.2");', 'assert_eq!(PRODUCT_VERSION, "0.2.3");')
+          lib_path.write_text(text, encoding='utf-8')
+
+          replacements = {
+              Path('apps/desktop/src/App.tsx'): [('const PRODUCT_VERSION = "0.2.1";', 'const PRODUCT_VERSION = "0.2.3";'), ('const PRODUCT_VERSION = "0.2.2";', 'const PRODUCT_VERSION = "0.2.3";')],
+              Path('apps/desktop/src-tauri/tauri.conf.json'): [('"version": "0.2.2"', '"version": "0.2.3"')],
+              Path('apps/desktop/src-tauri/Cargo.toml'): [('version = "0.2.2"', 'version = "0.2.3"')],
+              Path('apps/desktop/scripts/upgrade-qa.ps1'): [('0.2.2', '0.2.3')],
+          }
+          for path, pairs in replacements.items():
+              value = path.read_text(encoding='utf-8')
+              original = value
+              for old, new in pairs:
+                  value = value.replace(old, new)
+              if value == original and '0.2.3' not in value:
+                  raise SystemExit(f'version marker not found in {path}')
+              path.write_text(value, encoding='utf-8')
+
+          cargo_lock = Path('apps/desktop/src-tauri/Cargo.lock')
+          lock = cargo_lock.read_text(encoding='utf-8')
+          lock, changed = re.subn(r'(name = "selfrelay-desktop-core"\nversion = ")[^"]+("\n)', r'\g<1>0.2.3\2', lock, count=1)
+          if changed != 1:
+              raise SystemExit('Cargo.lock SelfRelay package marker not found')
+          cargo_lock.write_text(lock, encoding='utf-8')
+          PY
+
+          cd apps/desktop
+          npm version 0.2.3 --no-git-tag-version
+          cd ../..
+
+      - name: Commit finalized source
+        shell: bash
+        run: |
+          git config user.name "veltira"
+          git config user.email "asistente.veltira@gmail.com"
+          git add apps/desktop
+          git diff --cached --check
+          git commit -m "Finalize Desktop 0.2.3 recovery and transcription"
+          git push origin HEAD:fix/desktop-app-selection
