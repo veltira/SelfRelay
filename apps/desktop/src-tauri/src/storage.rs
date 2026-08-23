@@ -117,6 +117,13 @@ pub fn apply_migrations(connection: &mut Connection) -> rusqlite::Result<()> {
         tx.commit()?;
     }
 
+    // Older D1 builds may already report schema v2 while missing this setting.
+    // Repair the key without changing a user's existing completed value.
+    connection.execute(
+        "INSERT OR IGNORE INTO settings(key, value) VALUES ('desktop_onboarding_completed', '0')",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -364,6 +371,29 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(max_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn fresh_install_starts_with_onboarding_incomplete_and_zero_tracked_apps() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        apply_migrations(&mut connection).unwrap();
+        assert!(!onboarding_completed(&connection).unwrap());
+        assert!(load_tracked_applications(&connection).unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_onboarding_setting_is_repaired_without_resetting_schema() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        apply_migrations(&mut connection).unwrap();
+        connection.execute("DELETE FROM settings WHERE key = 'desktop_onboarding_completed'", []).unwrap();
+        apply_migrations(&mut connection).unwrap();
+        assert!(!onboarding_completed(&connection).unwrap());
+        let value: String = connection.query_row(
+            "SELECT value FROM settings WHERE key = 'desktop_onboarding_completed'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(value, "0");
     }
 
     #[test]
