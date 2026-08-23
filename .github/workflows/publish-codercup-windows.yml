@@ -13,8 +13,9 @@ permissions:
 
 env:
   RELEASE_TAG: codercup-2026
-  INSTALLER_SHA256: a12061a72981cfedfa33e723cb10d4abf668c289b4b74026e3009ccea31df0ce
-  VALIDATED_ARTIFACT_ID: '9492871315'
+  WINDOWS_VERSION: '0.2.3'
+  INSTALLER_SHA256: 0e5ac37d05e719df464928c1a9b2da9aed26c429deca39d541397bc67bb8d91c
+  VALIDATED_ARTIFACT_ID: '9500130740'
   CHROME_VERSION: '0.4.3'
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download physically validated Windows artifact
+      - name: Download validated Windows 0.2.3 artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -35,12 +36,33 @@ jobs:
           unzip -q windows-artifact.zip -d windows-artifact
           test -f windows-artifact/dist/SelfRelay-Setup.exe
           test -f windows-artifact/dist/desktop-package-metadata.txt
+          grep -qx "VERSION=${WINDOWS_VERSION}" windows-artifact/dist/desktop-package-metadata.txt
+          grep -qx 'TRANSCRIPTION=LOCAL_WHISPER_ASYNC_AUTOMATIC_ON_RECOVERY_WITH_MANUAL_RETRY' windows-artifact/dist/desktop-package-metadata.txt
 
-      - name: Verify exact installer tested by the user
+      - name: Verify exact validated installer
         run: |
           echo "${INSTALLER_SHA256}  windows-artifact/dist/SelfRelay-Setup.exe" | sha256sum --check --strict
 
-      - name: Publish Windows installer to CoderCup Release
+      - name: Build browser-friendly Windows ZIP
+        run: |
+          rm -rf windows-release
+          mkdir -p windows-release
+          cp windows-artifact/dist/SelfRelay-Setup.exe windows-release/SelfRelay-Setup.exe
+          cp windows-artifact/dist/desktop-package-metadata.txt windows-release/desktop-package-metadata.txt
+          cat > windows-release/LEEME.txt <<EOF
+          SelfRelay Desktop ${WINDOWS_VERSION}
+
+          1. Extrae este ZIP.
+          2. Ejecuta SelfRelay-Setup.exe.
+          3. SHA-256 del instalador: ${INSTALLER_SHA256}
+
+          SelfRelay utiliza Whisper local para transcribir notas de voz. No requiere tokens ni APIs de IA pagas.
+
+          El instalador no dispone actualmente de una firma Authenticode comercial. Windows SmartScreen puede mostrar una advertencia de aplicación no reconocida hasta que exista reputación de editor/archivo.
+          EOF
+          (cd windows-release && zip -q -9 ../SelfRelay-Windows-0.2.3.zip SelfRelay-Setup.exe desktop-package-metadata.txt LEEME.txt)
+
+      - name: Publish Windows assets to CoderCup Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -53,6 +75,7 @@ jobs:
           gh release upload "${RELEASE_TAG}" \
             windows-artifact/dist/SelfRelay-Setup.exe \
             windows-artifact/dist/desktop-package-metadata.txt \
+            SelfRelay-Windows-0.2.3.zip \
             --clobber
 
       - name: Download public Release assets again
@@ -63,15 +86,23 @@ jobs:
           mkdir -p release-verify
           gh release download "${RELEASE_TAG}" \
             --pattern 'SelfRelay-Setup.exe' \
+            --pattern 'SelfRelay-Windows-0.2.3.zip' \
             --pattern 'SelfRelay-Chrome.zip' \
             --dir release-verify
           test -f release-verify/SelfRelay-Setup.exe
+          test -f release-verify/SelfRelay-Windows-0.2.3.zip
           test -f release-verify/SelfRelay-Chrome.zip
 
-      - name: Verify Windows public download byte-for-byte
+      - name: Verify Windows public downloads byte-for-byte
         run: |
           echo "${INSTALLER_SHA256}  release-verify/SelfRelay-Setup.exe" | sha256sum --check --strict
           cmp windows-artifact/dist/SelfRelay-Setup.exe release-verify/SelfRelay-Setup.exe
+          rm -rf zip-verify
+          mkdir zip-verify
+          unzip -q release-verify/SelfRelay-Windows-0.2.3.zip -d zip-verify
+          echo "${INSTALLER_SHA256}  zip-verify/SelfRelay-Setup.exe" | sha256sum --check --strict
+          cmp windows-artifact/dist/SelfRelay-Setup.exe zip-verify/SelfRelay-Setup.exe
+          grep -qx "VERSION=${WINDOWS_VERSION}" zip-verify/desktop-package-metadata.txt
 
       - name: Verify public Chrome package is SelfRelay 0.4.3
         run: |
@@ -87,8 +118,11 @@ jobs:
         run: |
           RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           WINDOWS_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SelfRelay-Setup.exe"
+          WINDOWS_ZIP_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SelfRelay-Windows-0.2.3.zip"
           CHROME_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SelfRelay-Chrome.zip"
           WINDOWS_SIZE=$(stat -c%s release-verify/SelfRelay-Setup.exe)
+          WINDOWS_ZIP_SIZE=$(stat -c%s release-verify/SelfRelay-Windows-0.2.3.zip)
+          WINDOWS_ZIP_SHA256=$(sha256sum release-verify/SelfRelay-Windows-0.2.3.zip | awk '{print $1}')
           CHROME_SIZE=$(stat -c%s release-verify/SelfRelay-Chrome.zip)
           CHROME_SHA256=$(sha256sum release-verify/SelfRelay-Chrome.zip | awk '{print $1}')
           mkdir -p docs
@@ -98,10 +132,14 @@ jobs:
           This file is generated only after GitHub Actions publishes and re-downloads the public release assets successfully.
 
           - Release: ${RELEASE_URL}
-          - Windows: ${WINDOWS_URL}
-          - Windows version: 0.2.2
-          - Windows SHA-256: ${INSTALLER_SHA256}
-          - Windows size: ${WINDOWS_SIZE} bytes
+          - Windows installer: ${WINDOWS_URL}
+          - Windows ZIP: ${WINDOWS_ZIP_URL}
+          - Windows version: ${WINDOWS_VERSION}
+          - Windows installer SHA-256: ${INSTALLER_SHA256}
+          - Windows installer size: ${WINDOWS_SIZE} bytes
+          - Windows ZIP SHA-256: ${WINDOWS_ZIP_SHA256}
+          - Windows ZIP size: ${WINDOWS_ZIP_SIZE} bytes
+          - Windows transcription: local Whisper, asynchronous, automatic on recovery with manual retry
           - Chrome: ${CHROME_URL}
           - Chrome version verified from packaged manifest: ${CHROME_VERSION}
           - Chrome SHA-256: ${CHROME_SHA256}
