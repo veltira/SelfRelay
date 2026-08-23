@@ -8,7 +8,9 @@ on:
       - "apps/desktop/**"
       - ".github/workflows/desktop-package.yml"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "desktop/**"
     paths:
       - "apps/desktop/**"
       - ".github/workflows/desktop-package.yml"
