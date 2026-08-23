@@ -51,9 +51,6 @@ pub fn tracked_matches_metadata(application: &TrackedApplication, metadata: &Win
         }
     }
 
-    // Compatibility with 0.2.0 rules. Basename matching is intentionally
-    // limited to legacy app:<exe> identities so two modern path identities do
-    // not collapse merely because their binaries share a filename.
     application.application_id.starts_with("app:")
         && application.application_id == legacy_application_id(&metadata.executable_name)
 }
@@ -72,14 +69,11 @@ pub fn migrate_020_identities(db_path: &Path) -> rusqlite::Result<()> {
                AND executable_path IS NOT NULL
                AND TRIM(executable_path) <> ''",
         )?;
-        statement
+        let rows = statement
             .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
     };
-
-    if legacy.is_empty() {
-        return Ok(());
-    }
 
     let tx = connection.transaction()?;
     for (old_id, executable_path) in legacy {
