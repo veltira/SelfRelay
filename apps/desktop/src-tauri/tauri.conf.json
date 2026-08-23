@@ -51,7 +51,7 @@
         "resizable": true,
         "fullscreen": false,
         "alwaysOnTop": true,
-        "skipTaskbar": true,
+        "skipTaskbar": false,
         "visible": false
       }
     ],
