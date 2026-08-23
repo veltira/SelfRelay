@@ -11,6 +11,8 @@ import { CaptureRuntimeSurface, RecoveryRuntimeSurface } from "./SurfaceRuntime"
 import type { RecoveryView } from "./types";
 import "./styles.css";
 
+// Recovery is intentionally guarded twice in 0.2.3: backend owns durable state,
+// while this WebView guard guarantees a consumed recovery can never stay visible blank.
 const transcriptionInFlight = new Set<number>();
 
 function RecoveryWindowRoot() {
