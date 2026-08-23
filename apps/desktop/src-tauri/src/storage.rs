@@ -195,15 +195,14 @@ pub fn load_tracked_applications(connection: &Connection) -> rusqlite::Result<Ve
          WHERE scope = 'application' AND enabled = 1
          ORDER BY COALESCE(application_name, application_id) COLLATE NOCASE",
     )?;
-    statement
-        .query_map([], |row| {
-            Ok(TrackedApplication {
-                application_id: row.get(0)?,
-                application_name: row.get(1)?,
-                executable_path: row.get(2)?,
-            })
-        })?
-        .collect()
+    let rows = statement.query_map([], |row| {
+        Ok(TrackedApplication {
+            application_id: row.get(0)?,
+            application_name: row.get(1)?,
+            executable_path: row.get(2)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub fn is_application_enabled(connection: &Connection, application_id: &str) -> rusqlite::Result<bool> {
