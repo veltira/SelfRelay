@@ -23,6 +23,10 @@ export interface TrackedApplication {
 }
 
 export interface DiscoveredApplication extends TrackedApplication {
+  executableName?: string | null;
+  aliases: string[];
+  packageFamilyName?: string | null;
+  appUserModelId?: string | null;
   running: boolean;
   foreground: boolean;
 }
@@ -40,10 +44,12 @@ export interface WorksetOption {
 }
 
 export interface CaptureView {
+  id: string;
   applicationId: string;
   applicationName: string;
   contextId: string;
   contextLabel: string;
+  createdAtMs: number;
   worksets: WorksetOption[];
 }
 
