@@ -134,12 +134,15 @@ impl ApplicationAdapter for GenericAdapter {
         let exe = executable_name(metadata);
         let title = normalize_title(&metadata.raw_title);
         let app_label = metadata.executable_name.trim_end_matches(".exe").to_string();
+        let application_id = format!("app:{exe}");
         NormalizedContext {
-            application_id: format!("app:{exe}"),
+            application_id: application_id.clone(),
             application_name: if app_label.is_empty() { "Application".into() } else { app_label },
             adapter_id: self.id().into(),
-            context_id: format!("generic:{exe}:{}", identity_component(&title)),
-            context_label: title,
+            // Generic applications expose no reliable document/workspace identity. Keep the
+            // application as the durable context instead of treating mutable window titles as IDs.
+            context_id: application_id,
+            context_label: if title.is_empty() { metadata.executable_name.clone() } else { title },
             stability: ContextStability::Fallback,
         }
     }
@@ -209,10 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn generic_adapter_uses_executable_and_normalized_title() {
-        let context = derive_context(&metadata("notepad.exe", "  notes.txt  "));
-        assert_eq!(context.adapter_id, "generic");
-        assert_eq!(context.context_id, "generic:notepad.exe:notes.txt");
-        assert_eq!(context.stability, ContextStability::Fallback);
+    fn generic_adapter_uses_application_identity_not_window_title() {
+        let a = derive_context(&metadata("notepad.exe", "notes.txt - Notepad"));
+        let b = derive_context(&metadata("notepad.exe", "another.txt - Notepad"));
+        assert_eq!(a.adapter_id, "generic");
+        assert_eq!(a.context_id, "app:notepad.exe");
+        assert_eq!(a.context_id, b.context_id);
+        assert_eq!(a.stability, ContextStability::Fallback);
     }
 }
