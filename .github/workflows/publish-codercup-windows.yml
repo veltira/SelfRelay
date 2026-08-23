@@ -36,8 +36,9 @@ jobs:
           unzip -q windows-artifact.zip -d windows-artifact
           test -f windows-artifact/dist/SelfRelay-Setup.exe
           test -f windows-artifact/dist/desktop-package-metadata.txt
-          grep -qx "VERSION=${WINDOWS_VERSION}" windows-artifact/dist/desktop-package-metadata.txt
-          grep -qx 'TRANSCRIPTION=LOCAL_WHISPER_ASYNC_AUTOMATIC_ON_RECOVERY_WITH_MANUAL_RETRY' windows-artifact/dist/desktop-package-metadata.txt
+          tr -d '\r' < windows-artifact/dist/desktop-package-metadata.txt > windows-artifact/dist/desktop-package-metadata.normalized.txt
+          grep -qx "VERSION=${WINDOWS_VERSION}" windows-artifact/dist/desktop-package-metadata.normalized.txt
+          grep -qx 'TRANSCRIPTION=LOCAL_WHISPER_ASYNC_AUTOMATIC_ON_RECOVERY_WITH_MANUAL_RETRY' windows-artifact/dist/desktop-package-metadata.normalized.txt
 
       - name: Verify exact validated installer
         run: |
@@ -102,7 +103,8 @@ jobs:
           unzip -q release-verify/SelfRelay-Windows-0.2.3.zip -d zip-verify
           echo "${INSTALLER_SHA256}  zip-verify/SelfRelay-Setup.exe" | sha256sum --check --strict
           cmp windows-artifact/dist/SelfRelay-Setup.exe zip-verify/SelfRelay-Setup.exe
-          grep -qx "VERSION=${WINDOWS_VERSION}" zip-verify/desktop-package-metadata.txt
+          tr -d '\r' < zip-verify/desktop-package-metadata.txt > zip-verify/desktop-package-metadata.normalized.txt
+          grep -qx "VERSION=${WINDOWS_VERSION}" zip-verify/desktop-package-metadata.normalized.txt
 
       - name: Verify public Chrome package is SelfRelay 0.4.3
         run: |
