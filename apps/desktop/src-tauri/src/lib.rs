@@ -42,7 +42,7 @@ use tauri::{
     Emitter, Manager, State, WindowEvent,
 };
 
-const PRODUCT_VERSION: &str = "0.2.2";
+const PRODUCT_VERSION: &str = "0.2.3";
 static AUDIO_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static WORKSET_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static SURFACE_WATCHDOGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -256,6 +256,12 @@ fn surface_token_ready(state: &DesktopState, label: &str, expected: &str) -> boo
         .and_then(|ready| ready.get(label).cloned())
         .as_deref()
         == Some(expected)
+}
+
+fn clear_surface_ready(state: &DesktopState, label: &str) {
+    if let Ok(mut ready) = state.surface_ready.lock() {
+        ready.remove(label);
+    }
 }
 
 fn schedule_surface_watchdog(app: &tauri::AppHandle, label: &str, expected: &str) {
@@ -786,11 +792,15 @@ fn checkpoints_for_target(
 }
 
 #[tauri::command]
-fn get_active_recovery(state: State<'_, DesktopState>) -> Result<Option<RecoveryView>, String> {
+fn get_active_recovery(state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<Option<RecoveryView>, String> {
     let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
     let mut queue = state.recovery_queue.lock().map_err(|_| "recovery lock poisoned".to_string())?;
     loop {
-        let Some(target) = queue.front().cloned() else { return Ok(None); };
+        let Some(target) = queue.front().cloned() else {
+            clear_surface_ready(&state, "recovery");
+            hide_surface(&app, "recovery");
+            return Ok(None);
+        };
         let checkpoints = checkpoints_for_target(&connection, &target)?;
         if checkpoints.is_empty() {
             queue.pop_front();
@@ -878,6 +888,7 @@ fn defer_recovery(state: State<'_, DesktopState>, app: tauri::AppHandle) -> Resu
     queue.pop_front();
     let has_more = !queue.is_empty();
     drop(queue);
+    clear_surface_ready(&state, "recovery");
     if has_more { show_surface(&app, "recovery"); } else { hide_surface(&app, "recovery"); }
     let _ = app.emit("desktop://state-changed", ());
     Ok(())
@@ -895,6 +906,7 @@ fn resolve_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHa
     }
     let has_more = !queue.is_empty();
     drop(queue);
+    clear_surface_ready(&state, "recovery");
     if has_more { show_surface(&app, "recovery"); } else { hide_surface(&app, "recovery"); }
     let _ = app.emit("desktop://state-changed", ());
     Ok(())
@@ -911,8 +923,11 @@ fn get_checkpoint_audio(id: i64, state: State<'_, DesktopState>) -> Result<Vec<u
 }
 
 #[tauri::command]
-fn transcribe_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<String, String> {
-    let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
+async fn transcribe_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<String, String> {
+    let db_path = state.db_path.clone();
+    let resource_dir = state.resource_dir.clone();
+    let work_dir = state.data_dir.join("transcription-temp");
+    let connection = storage::open(&db_path).map_err(|error| error.to_string())?;
     let checkpoint = storage::checkpoint_by_id(&connection, id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Checkpoint no encontrado.".to_string())?;
@@ -922,12 +937,15 @@ fn transcribe_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::Ap
     let audio_path = checkpoint.audio_path.map(PathBuf::from)
         .ok_or_else(|| "Este checkpoint no tiene audio para transcribir.".to_string())?;
     drop(connection);
-    let transcript = transcription::transcribe(
-        &audio_path,
-        &state.resource_dir,
-        &state.data_dir.join("transcription-temp"),
-    )?;
-    let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
+    drop(state);
+
+    let transcript = tauri::async_runtime::spawn_blocking(move || {
+        transcription::transcribe(&audio_path, &resource_dir, &work_dir)
+    })
+    .await
+    .map_err(|error| format!("El proceso local de transcripción no pudo completarse: {error}"))??;
+
+    let connection = storage::open(&db_path).map_err(|error| error.to_string())?;
     storage::set_checkpoint_transcript(&connection, id, &transcript)
         .map_err(|error| error.to_string())?;
     let _ = app.emit("desktop://state-changed", ());
@@ -1299,6 +1317,7 @@ pub fn run() {
                         if let Ok(mut queue) = state.recovery_queue.lock() {
                             queue.pop_front();
                         }
+                        clear_surface_ready(&state, "recovery");
                         let _ = window.hide();
                         let _ = window.app_handle().emit("desktop://state-changed", ());
                     }
@@ -1356,6 +1375,6 @@ mod tests {
 
     #[test]
     fn product_version_is_complete_candidate_line() {
-        assert_eq!(PRODUCT_VERSION, "0.2.2");
+        assert_eq!(PRODUCT_VERSION, "0.2.3");
     }
 }

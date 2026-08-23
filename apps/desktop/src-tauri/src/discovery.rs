@@ -19,7 +19,7 @@ pub struct DiscoveredApplication {
 pub fn discover(records: &[WindowRecord]) -> Vec<DiscoveredApplication> {
     let mut applications = HashMap::<String, DiscoveredApplication>::new();
     for record in records {
-        if !record.metadata.executable_name.is_empty() && !eligible_executable(&record.metadata.executable_name) {
+        if !record.metadata.executable_name.is_empty() && !trackable_executable(&record.metadata.executable_name) {
             continue;
         }
         merge(&mut applications, DiscoveredApplication {
@@ -83,8 +83,10 @@ pub fn validate_trackable(application: &TrackedApplication, records: &[WindowRec
         return Ok(());
     }
     if let Some(path) = application.executable_path.as_deref() {
-        if Path::new(path).is_file()
-            && Path::new(path).extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("exe")).unwrap_or(false)
+        let input = Path::new(path);
+        if input.is_file()
+            && input.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("exe")).unwrap_or(false)
+            && input.file_name().and_then(|value| value.to_str()).map(trackable_executable).unwrap_or(false)
         {
             return Ok(());
         }
@@ -103,8 +105,8 @@ fn tracked_from_executable(path: &str, preferred_name: Option<&str>) -> Result<T
     let executable_name = input.file_name().and_then(|value| value.to_str()).ok_or_else(|| {
         "No pudimos seguir esta aplicación todavía. El ejecutable no tiene un nombre válido.".to_string()
     })?;
-    if !eligible_executable(executable_name) {
-        return Err("No pudimos seguir esta aplicación todavía. Ese archivo parece ser un helper, updater o componente del sistema.".into());
+    if !trackable_executable(executable_name) {
+        return Err("No pudimos seguir esta aplicación todavía. Ese ejecutable pertenece a SelfRelay o a un componente interno de Windows.".into());
     }
     Ok(TrackedApplication {
         application_id: identity::application_id(Some(path), executable_name, None),
@@ -122,6 +124,10 @@ pub fn friendly_name(executable_name: &str) -> String {
         "excel.exe" => "Microsoft Excel".into(),
         "powerpnt.exe" => "Microsoft PowerPoint".into(),
         "code.exe" => "Visual Studio Code".into(),
+        "chrome.exe" => "Google Chrome".into(),
+        "msedge.exe" => "Microsoft Edge".into(),
+        "firefox.exe" => "Mozilla Firefox".into(),
+        "brave.exe" => "Brave".into(),
         "spotify.exe" => "Spotify".into(),
         "discord.exe" => "Discord".into(),
         name => name.trim_end_matches(".exe").replace(['_', '-'], " "),
@@ -147,16 +153,20 @@ fn merge(applications: &mut HashMap<String, DiscoveredApplication>, candidate: D
     }).or_insert(candidate);
 }
 
-fn eligible_executable(executable_name: &str) -> bool {
+fn trackable_executable(executable_name: &str) -> bool {
     let lower = executable_name.to_ascii_lowercase();
     if !lower.ends_with(".exe") || lower.trim() == ".exe" { return false; }
-    if matches!(lower.as_str(),
-        "selfrelay.exe" | "selfrelay-desktop-core.exe" | "chrome.exe" | "msedge.exe" |
+    !matches!(lower.as_str(),
+        "selfrelay.exe" | "selfrelay-desktop-core.exe" |
         "explorer.exe" | "dwm.exe" | "taskhostw.exe" | "sihost.exe" |
-        "startmenuexperiencehost.exe" | "searchhost.exe" | "applicationframehost.exe")
-    {
-        return false;
-    }
+        "startmenuexperiencehost.exe" | "searchhost.exe" | "applicationframehost.exe" |
+        "runtimebroker.exe" | "backgroundtaskhost.exe" | "textinputhost.exe" |
+        "shellexperiencehost.exe" | "screenclippinghost.exe")
+}
+
+fn auto_discovery_executable(executable_name: &str) -> bool {
+    if !trackable_executable(executable_name) { return false; }
+    let lower = executable_name.to_ascii_lowercase();
     !["unins", "uninstall", "update", "updater", "crashpad", "helper", "service", "broker", "runtime", "installer", "setup", "elevate"]
         .iter().any(|needle| lower.contains(needle))
 }
@@ -177,7 +187,7 @@ fn windows_installed_applications() -> Vec<DiscoveredApplication> {
 #[cfg(windows)]
 fn candidate_from_executable(path: String, name: String, aliases: Vec<String>) -> Option<DiscoveredApplication> {
     let executable_name = Path::new(&path).file_name()?.to_str()?.to_string();
-    if !eligible_executable(&executable_name) || !Path::new(&path).is_file() { return None; }
+    if !auto_discovery_executable(&executable_name) || !Path::new(&path).is_file() { return None; }
     Some(DiscoveredApplication {
         application_id: identity::application_id(Some(&path), &executable_name, None),
         application_name: name,
@@ -309,7 +319,7 @@ fn app_paths(root: ::windows::Win32::System::Registry::HKEY) -> Vec<DiscoveredAp
     for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
         let Some(key) = open_key(root, base, KEY_READ | view) else { continue; };
         for subkey in enum_subkeys(key) {
-            if !eligible_executable(&subkey) { continue; }
+            if !auto_discovery_executable(&subkey) { continue; }
             let full = format!(r"{}\{}", base, subkey);
             if let Some(path) = read_registry_string(root, &full, None, KEY_READ | view) {
                 if let Some(candidate) = candidate_from_executable(path.clone(), friendly_name(&subkey), vec![subkey, path]) {
@@ -427,11 +437,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filters_helpers_and_selfrelay() {
-        assert!(!eligible_executable("SelfRelay.exe"));
-        assert!(!eligible_executable("AcmeUpdater.exe"));
-        assert!(!eligible_executable("service-helper.exe"));
-        assert!(eligible_executable("notepad.exe"));
+    fn auto_discovery_filters_helpers_but_manual_tracking_is_permissive() {
+        assert!(!trackable_executable("SelfRelay.exe"));
+        assert!(!trackable_executable("RuntimeBroker.exe"));
+        assert!(trackable_executable("chrome.exe"));
+        assert!(trackable_executable("msedge.exe"));
+        assert!(trackable_executable("AcmeUpdater.exe"));
+        assert!(!auto_discovery_executable("AcmeUpdater.exe"));
+        assert!(!auto_discovery_executable("service-helper.exe"));
+        assert!(auto_discovery_executable("notepad.exe"));
+        assert!(auto_discovery_executable("chrome.exe"));
     }
 
     #[test]

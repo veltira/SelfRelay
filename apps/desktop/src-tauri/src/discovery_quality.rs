@@ -108,17 +108,6 @@ fn app_user_model_id_is_document_or_shell_artifact(candidate: &DiscoveredApplica
         .any(|suffix| lower.ends_with(suffix))
 }
 
-fn unsupported_browser_identity(candidate: &DiscoveredApplication) -> bool {
-    // Chromium browsers are deliberately handled by the frozen Chrome product,
-    // and the Desktop observer excludes their windows. Do not offer candidates
-    // that a user could select but Desktop cannot actually follow.
-    let fingerprint = candidate_fingerprint(candidate).to_ascii_lowercase();
-    fingerprint.contains("chrome.exe")
-        || candidate.application_name.eq_ignore_ascii_case("Google Chrome")
-        || fingerprint.contains(" msedge")
-        || candidate.application_name.eq_ignore_ascii_case("Microsoft Edge")
-}
-
 fn known_windows_display_name(candidate: &DiscoveredApplication) -> Option<&'static str> {
     let lower = candidate_fingerprint(candidate).to_ascii_lowercase();
     if lower.contains("windowsnotepad") || lower.ends_with(" notepad.exe") || lower.contains("\\notepad.exe") {
@@ -171,7 +160,6 @@ fn useful_display_name(candidate: &DiscoveredApplication) -> Option<String> {
     if contains_internal_marker(&fingerprint)
         || contains_non_app_display_marker(&candidate.application_name)
         || app_user_model_id_is_document_or_shell_artifact(candidate)
-        || unsupported_browser_identity(candidate)
     {
         return None;
     }
@@ -362,6 +350,18 @@ mod tests {
         ]);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].application_name, "Paint");
+        assert_quality(&filtered).unwrap();
+    }
+
+    #[test]
+    fn keeps_supported_browsers() {
+        let filtered = filter(vec![
+            app("chrome", "Google Chrome", Some("chrome.exe"), None),
+            app("edge", "Microsoft Edge", Some("msedge.exe"), None),
+        ]);
+        let names = filtered.iter().map(|item| item.application_name.as_str()).collect::<Vec<_>>();
+        assert!(names.contains(&"Google Chrome"));
+        assert!(names.contains(&"Microsoft Edge"));
         assert_quality(&filtered).unwrap();
     }
 

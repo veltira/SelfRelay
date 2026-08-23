@@ -47,7 +47,7 @@ jobs:
       - name: Build native upgrade fixture
         working-directory: apps/desktop/src-tauri
         run: cargo build --release --bin selfrelay-window-fixture
-      - name: Build NSIS 0.2.2 release
+      - name: Build NSIS 0.2.3 release
         working-directory: apps/desktop
         run: npm run tauri:build
 
@@ -76,10 +76,10 @@ jobs:
         shell: pwsh
         run: |
           $config = Get-Content (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json
-          if ($config.version -ne "0.2.2") { throw "Unexpected Desktop product version: $($config.version)" }
+          if ($config.version -ne "0.2.3") { throw "Unexpected Desktop product version: $($config.version)" }
           $nsis = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/bundle/nsis"
-          $installer = Get-ChildItem $nsis -Filter "*.exe" -File | Where-Object Name -Match "0\.2\.2" | Select-Object -First 1
-          if (-not $installer) { throw "No 0.2.2 NSIS installer was produced" }
+          $installer = Get-ChildItem $nsis -Filter "*.exe" -File | Where-Object Name -Match "0\.2\.3" | Select-Object -First 1
+          if (-not $installer) { throw "No 0.2.3 NSIS installer was produced" }
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item $installer.FullName (Join-Path $dist "SelfRelay-Setup.exe") -Force
@@ -99,7 +99,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upgrade 0.2.1 to 0.2.2, single-instance and uninstall QA
+      - name: Upgrade 0.2.1 to 0.2.3, single-instance and uninstall QA
         shell: pwsh
         run: |
           Get-Process -Name "SelfRelay" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -128,7 +128,7 @@ jobs:
             if ($null -eq $Signature.SignerCertificate) { return "UNSIGNED" }
             return "SIGNED"
           }
-          $version = "0.2.2"
+          $version = "0.2.3"
           $appExe = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/release/SelfRelay.exe"
           $installer = Join-Path $env:GITHUB_WORKSPACE "dist/SelfRelay-Setup.exe"
           $appSignature = Get-AuthenticodeSignature $appExe
@@ -147,6 +147,7 @@ jobs:
             "INSTALLER_SIZE=$installerSize"
             "INSTALLER_SHA256=$installerHash"
             "WHISPER_RUNTIME=LOCAL_ON_DEMAND"
+            "TRANSCRIPTION=LOCAL_WHISPER_ASYNC_AUTOMATIC_ON_RECOVERY_WITH_MANUAL_RETRY"
             "UPGRADE_FROM=0.2.1"
             "RUNTIME_CAPTURE_IDS=DURABLE_SQLITE"
             "CAPTURE_WEBVIEW_HANDSHAKE=REQUIRED"
@@ -157,10 +158,10 @@ jobs:
           $metadata | ForEach-Object { Write-Host $_ }
           $metadata | Set-Content (Join-Path $env:GITHUB_WORKSPACE "dist/desktop-package-metadata.txt") -Encoding utf8
 
-      - name: Upload Windows 0.2.2 product candidate
+      - name: Upload Windows 0.2.3 product candidate
         uses: actions/upload-artifact@v4
         with:
-          name: SelfRelay-Windows-Installer-0.2.2
+          name: SelfRelay-Windows-Installer-0.2.3
           path: |
             dist/SelfRelay-Setup.exe
             dist/desktop-package-metadata.txt

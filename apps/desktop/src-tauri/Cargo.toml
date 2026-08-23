@@ -1,6 +1,6 @@
 [package]
 name = "selfrelay-desktop-core"
-version = "0.2.2"
+version = "0.2.3"
 description = "SelfRelay Desktop for Windows"
 authors = ["Veltira"]
 edition = "2021"
