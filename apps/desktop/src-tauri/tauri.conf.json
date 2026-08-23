@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SelfRelay",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "identifier": "com.veltira.selfrelay",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -63,7 +63,7 @@
     "publisher": "Veltira",
     "shortDescription": "Volvé a tu trabajo con el contexto que dejaste.",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
-    "resources": ["resources/whisper/whisper-cli.exe", "resources/whisper/ggml-base-q5_1.bin"],
+    "resources": ["resources/whisper/ggml-base-q5_1.bin"],
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper" },
       "nsis": {

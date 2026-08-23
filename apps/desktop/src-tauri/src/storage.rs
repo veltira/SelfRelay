@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,12 +145,32 @@ pub fn apply_migrations(connection: &mut Connection) -> rusqlite::Result<()> {
         tx.commit()?;
     }
 
+    if schema_version(connection)? < 4 {
+        let tx = connection.transaction()?;
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_checkpoints_application_history
+                ON checkpoints(application_id, created_at_ms, id);
+             CREATE INDEX IF NOT EXISTS idx_checkpoints_workset_history
+                ON checkpoints(workset_id, created_at_ms, id);
+             INSERT OR IGNORE INTO settings(key, value) VALUES ('archive_resolved_checkpoints', '1');",
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at_ms) VALUES (4, 0)",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
     connection.execute(
         "INSERT OR IGNORE INTO settings(key, value) VALUES ('desktop_onboarding_completed', '0')",
         [],
     )?;
     connection.execute(
         "INSERT OR IGNORE INTO settings(key, value) VALUES ('launch_at_startup', '0')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT OR IGNORE INTO settings(key, value) VALUES ('archive_resolved_checkpoints', '1')",
         [],
     )?;
     Ok(())
@@ -507,6 +527,15 @@ pub fn resolve_checkpoint(connection: &Connection, id: i64, resolved_at_ms: u64)
     Ok(())
 }
 
+pub fn delete_checkpoint(connection: &Connection, id: i64) -> rusqlite::Result<Option<String>> {
+    let audio_path: Option<String> = connection
+        .query_row("SELECT audio_path FROM checkpoints WHERE id = ?1", [id], |row| row.get(0))
+        .optional()?
+        .flatten();
+    connection.execute("DELETE FROM checkpoints WHERE id = ?1", [id])?;
+    Ok(audio_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,6 +555,7 @@ mod tests {
         apply_migrations(&mut connection).unwrap();
         apply_migrations(&mut connection).unwrap();
         assert_eq!(schema_version(&connection).unwrap(), SCHEMA_VERSION);
+        assert!(bool_setting(&connection, "archive_resolved_checkpoints").unwrap());
     }
 
     #[test]

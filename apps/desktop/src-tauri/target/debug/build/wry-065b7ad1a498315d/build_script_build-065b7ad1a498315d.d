@@ -1,0 +1,5 @@
+D:\a\SelfRelay\SelfRelay\apps\desktop\src-tauri\target\debug\build\wry-065b7ad1a498315d\build_script_build-065b7ad1a498315d.d: C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wry-0.55.1\build.rs
+
+D:\a\SelfRelay\SelfRelay\apps\desktop\src-tauri\target\debug\build\wry-065b7ad1a498315d\build_script_build-065b7ad1a498315d.exe: C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wry-0.55.1\build.rs
+
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wry-0.55.1\build.rs:

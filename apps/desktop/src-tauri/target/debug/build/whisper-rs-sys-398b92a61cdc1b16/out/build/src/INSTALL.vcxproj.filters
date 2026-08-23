@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\a\SelfRelay\SelfRelay\apps\desktop\src-tauri\target\debug\build\whisper-rs-sys-398b92a61cdc1b16\out\build\CMakeFiles\48bc8e55c8436930088e9c0ab80a84b9\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{B82A1383-5BD9-3F0A-94FB-35A04465F781}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

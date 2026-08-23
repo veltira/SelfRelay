@@ -1,0 +1,9 @@
+D:\a\SelfRelay\SelfRelay\apps\desktop\src-tauri\target\debug\build\clang-sys-f25343a97b6b1f0f\build_script_build-f25343a97b6b1f0f.d: C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\macros.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\common.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\dynamic.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\static.rs
+
+D:\a\SelfRelay\SelfRelay\apps\desktop\src-tauri\target\debug\build\clang-sys-f25343a97b6b1f0f\build_script_build-f25343a97b6b1f0f.exe: C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\macros.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\common.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\dynamic.rs C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\static.rs
+
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build.rs:
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\macros.rs:
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\common.rs:
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\dynamic.rs:
+C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\clang-sys-1.9.1\build\static.rs:

@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/cmake_install.cmake",
+		"D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/cmake_install.cmake",
+		"D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/cmake_install.cmake",
+		"D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/ggml-cpu/cmake_install.cmake",
+		"D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

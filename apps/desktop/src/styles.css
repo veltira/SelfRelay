@@ -198,3 +198,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
   .onboarding-page { padding: 0; place-items: stretch; }
   .onboarding-panel { min-height: 100vh; border: 0; border-radius: 0; padding: 23px; }
 }
+
+
+/* Desktop 0.2.4 — history is a durable project timeline, not a dead log. */
+.history-group { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--border, #d9dee7); border-radius: 16px; background: var(--surface, #fff); }
+.history-group + .history-group { margin-top: 16px; }
+.history-group-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.history-group-head > div { display: grid; gap: 2px; }
+.history-group-head h2 { margin: 0; font-size: 17px; }
+.history-group-head span { font-size: 12px; opacity: .66; }
+.history-timeline { display: grid; gap: 10px; }
+.history-entry-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.history-entry .transcribe-link { margin-top: 8px; }

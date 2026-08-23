@@ -1,0 +1,10 @@
+^D:\A\SELFRELAY\SELFRELAY\APPS\DESKTOP\SRC-TAURI\TARGET\DEBUG\BUILD\WHISPER-RS-SYS-398B92A61CDC1B16\OUT\WHISPER.CPP\GGML\SRC\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/whisper.cpp -BD:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build --check-stamp-file D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

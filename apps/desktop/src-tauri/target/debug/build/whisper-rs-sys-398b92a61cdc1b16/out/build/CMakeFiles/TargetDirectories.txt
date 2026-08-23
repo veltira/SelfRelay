@@ -1,0 +1,12 @@
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/CMakeFiles/INSTALL.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/CMakeFiles/ALL_BUILD.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/CMakeFiles/ZERO_CHECK.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/CMakeFiles/INSTALL.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/CMakeFiles/ALL_BUILD.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/CMakeFiles/ggml-base.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/CMakeFiles/ggml.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/CMakeFiles/ggml-cpu.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/CMakeFiles/INSTALL.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/ggml/src/ggml-cpu/CMakeFiles/INSTALL.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/src/CMakeFiles/whisper.dir
+D:/a/SelfRelay/SelfRelay/apps/desktop/src-tauri/target/debug/build/whisper-rs-sys-398b92a61cdc1b16/out/build/src/CMakeFiles/INSTALL.dir

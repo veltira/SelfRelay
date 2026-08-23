@@ -42,7 +42,7 @@ use tauri::{
     Emitter, Manager, State, WindowEvent,
 };
 
-const PRODUCT_VERSION: &str = "0.2.3";
+const PRODUCT_VERSION: &str = "0.2.4";
 static AUDIO_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static WORKSET_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static SURFACE_WATCHDOGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -106,6 +106,12 @@ impl DesktopState {
 enum RecoveryTargetKind {
     Context(ContextSnapshot),
     Workset { id: String, name: String, source: ContextSnapshot },
+    Checkpoint {
+        id: i64,
+        target_name: String,
+        source: ContextSnapshot,
+        workset_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +173,7 @@ struct TrackingStatus {
 struct SettingsView {
     launch_at_startup: bool,
     tracking_active: bool,
+    archive_resolved_checkpoints: bool,
     version: &'static str,
     data_directory: String,
 }
@@ -787,6 +794,8 @@ fn checkpoints_for_target(
     match &target.kind {
         RecoveryTargetKind::Context(context) => storage::unresolved_for_context(connection, &context.context_id),
         RecoveryTargetKind::Workset { id, .. } => storage::unresolved_for_workset(connection, id),
+        RecoveryTargetKind::Checkpoint { id, .. } => storage::checkpoint_by_id(connection, *id)
+            .map(|checkpoint| checkpoint.into_iter().collect()),
     }
     .map_err(|error| error.to_string())
 }
@@ -827,6 +836,17 @@ fn get_active_recovery(state: State<'_, DesktopState>, app: tauri::AppHandle) ->
                 context_id: source.context_id,
                 context_label: source.context_label,
                 workset_id: Some(id),
+                ready_token,
+                checkpoints,
+            },
+            RecoveryTargetKind::Checkpoint { target_name, source, workset_id, .. } => RecoveryView {
+                target_kind: "checkpoint",
+                target_name,
+                application_id: source.application_id,
+                application_name: source.application_name,
+                context_id: source.context_id,
+                context_label: source.context_label,
+                workset_id,
                 ready_token,
                 checkpoints,
             },
@@ -897,17 +917,64 @@ fn defer_recovery(state: State<'_, DesktopState>, app: tauri::AppHandle) -> Resu
 #[tauri::command]
 fn resolve_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<(), String> {
     let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
-    storage::resolve_checkpoint(&connection, id, now_ms()).map_err(|error| error.to_string())?;
-    let mut queue = state.recovery_queue.lock().map_err(|_| "recovery lock poisoned".to_string())?;
-    if let Some(target) = queue.front() {
-        if checkpoints_for_target(&connection, target)?.is_empty() {
-            queue.pop_front();
-        }
+    let checkpoint = storage::checkpoint_by_id(&connection, id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Checkpoint no encontrado.".to_string())?;
+    let archive = storage::bool_setting(&connection, "archive_resolved_checkpoints")
+        .map_err(|error| error.to_string())?;
+    if archive {
+        storage::resolve_checkpoint(&connection, id, now_ms()).map_err(|error| error.to_string())?;
+    } else {
+        let audio_path = storage::delete_checkpoint(&connection, id).map_err(|error| error.to_string())?;
+        if let Some(path) = audio_path { let _ = fs::remove_file(path); }
     }
+
+    let mut queue = state.recovery_queue.lock().map_err(|_| "recovery lock poisoned".to_string())?;
+    let should_pop = queue.front().map(|target| match &target.kind {
+        RecoveryTargetKind::Checkpoint { id: target_id, .. } => *target_id == id,
+        _ => checkpoints_for_target(&connection, target).map(|items| items.is_empty()).unwrap_or(false),
+    }).unwrap_or(false);
+    if should_pop { queue.pop_front(); }
     let has_more = !queue.is_empty();
     drop(queue);
     clear_surface_ready(&state, "recovery");
     if has_more { show_surface(&app, "recovery"); } else { hide_surface(&app, "recovery"); }
+    let _ = app.emit("desktop://state-changed", ());
+    drop(checkpoint);
+    Ok(())
+}
+
+#[tauri::command]
+fn open_checkpoint(id: i64, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<(), String> {
+    let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
+    let checkpoint = storage::checkpoint_by_id(&connection, id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Checkpoint no encontrado.".to_string())?;
+    let target_name = checkpoint.workset_id.as_deref().and_then(|workset_id| {
+        storage::load_worksets(&connection).ok()?.into_iter()
+            .find(|workset| workset.id == workset_id)
+            .map(|workset| workset.name)
+    }).unwrap_or_else(|| checkpoint.application_name.clone());
+    let source = ContextSnapshot {
+        application_id: checkpoint.application_id.clone(),
+        application_name: checkpoint.application_name.clone(),
+        context_id: checkpoint.context_id.clone(),
+        context_label: checkpoint.context_label.clone(),
+    };
+    let mut queue = state.recovery_queue.lock().map_err(|_| "recovery lock poisoned".to_string())?;
+    queue.retain(|target| !matches!(&target.kind, RecoveryTargetKind::Checkpoint { id: current, .. } if *current == id));
+    queue.push_front(RecoveryTarget {
+        key: format!("checkpoint:{id}:{}", now_ms()),
+        kind: RecoveryTargetKind::Checkpoint {
+            id,
+            target_name,
+            source,
+            workset_id: checkpoint.workset_id,
+        },
+    });
+    drop(queue);
+    clear_surface_ready(&state, "recovery");
+    show_surface(&app, "recovery");
     let _ = app.emit("desktop://state-changed", ());
     Ok(())
 }
@@ -1046,6 +1113,7 @@ fn get_settings(state: State<'_, DesktopState>) -> Result<SettingsView, String> 
     Ok(SettingsView {
         launch_at_startup: storage::bool_setting(&connection, "launch_at_startup").map_err(|error| error.to_string())?,
         tracking_active: !state.paused.load(Ordering::Acquire),
+        archive_resolved_checkpoints: storage::bool_setting(&connection, "archive_resolved_checkpoints").map_err(|error| error.to_string())?,
         version: PRODUCT_VERSION,
         data_directory: state.data_dir.to_string_lossy().to_string(),
     })
@@ -1057,6 +1125,15 @@ fn set_launch_at_startup(enabled: bool, state: State<'_, DesktopState>, app: tau
     autostart::set_enabled(enabled, &executable)?;
     let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
     storage::set_bool_setting(&connection, "launch_at_startup", enabled).map_err(|error| error.to_string())?;
+    let _ = app.emit("desktop://state-changed", ());
+    get_settings(state)
+}
+
+#[tauri::command]
+fn set_archive_resolved_checkpoints(enabled: bool, state: State<'_, DesktopState>, app: tauri::AppHandle) -> Result<SettingsView, String> {
+    let connection = storage::open(&state.db_path).map_err(|error| error.to_string())?;
+    storage::set_bool_setting(&connection, "archive_resolved_checkpoints", enabled)
+        .map_err(|error| error.to_string())?;
     let _ = app.emit("desktop://state-changed", ());
     get_settings(state)
 }
@@ -1314,10 +1391,6 @@ pub fn run() {
                     }
                     "recovery" => {
                         api.prevent_close();
-                        if let Ok(mut queue) = state.recovery_queue.lock() {
-                            queue.pop_front();
-                        }
-                        clear_surface_ready(&state, "recovery");
                         let _ = window.hide();
                         let _ = window.app_handle().emit("desktop://state-changed", ());
                     }
@@ -1343,6 +1416,7 @@ pub fn run() {
             recovery_surface_ready,
             defer_recovery,
             resolve_checkpoint,
+            open_checkpoint,
             get_checkpoint_audio,
             transcribe_checkpoint,
             get_checkpoint_history,
@@ -1354,7 +1428,8 @@ pub fn run() {
             get_tracking_status,
             set_tracking_paused,
             get_settings,
-            set_launch_at_startup
+            set_launch_at_startup,
+            set_archive_resolved_checkpoints
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SelfRelay Desktop");
@@ -1375,6 +1450,6 @@ mod tests {
 
     #[test]
     fn product_version_is_complete_candidate_line() {
-        assert_eq!(PRODUCT_VERSION, "0.2.3");
+        assert_eq!(PRODUCT_VERSION, "0.2.4");
     }
 }
