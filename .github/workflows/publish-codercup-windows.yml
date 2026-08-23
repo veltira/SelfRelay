@@ -15,11 +15,15 @@ env:
   RELEASE_TAG: codercup-2026
   INSTALLER_SHA256: a12061a72981cfedfa33e723cb10d4abf668c289b4b74026e3009ccea31df0ce
   VALIDATED_ARTIFACT_ID: '9492871315'
+  CHROME_VERSION: '0.4.3'
 
 jobs:
-  publish-windows:
+  publish-and-verify:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download physically validated Windows artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,3 +54,62 @@ jobs:
             windows-artifact/dist/SelfRelay-Setup.exe \
             windows-artifact/dist/desktop-package-metadata.txt \
             --clobber
+
+      - name: Download public Release assets again
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf release-verify
+          mkdir -p release-verify
+          gh release download "${RELEASE_TAG}" \
+            --pattern 'SelfRelay-Setup.exe' \
+            --pattern 'SelfRelay-Chrome.zip' \
+            --dir release-verify
+          test -f release-verify/SelfRelay-Setup.exe
+          test -f release-verify/SelfRelay-Chrome.zip
+
+      - name: Verify Windows public download byte-for-byte
+        run: |
+          echo "${INSTALLER_SHA256}  release-verify/SelfRelay-Setup.exe" | sha256sum --check --strict
+          cmp windows-artifact/dist/SelfRelay-Setup.exe release-verify/SelfRelay-Setup.exe
+
+      - name: Verify public Chrome package is SelfRelay 0.4.3
+        run: |
+          unzip -t release-verify/SelfRelay-Chrome.zip >/dev/null
+          unzip -p release-verify/SelfRelay-Chrome.zip manifest.json > chrome-manifest.json
+          jq -e --arg version "${CHROME_VERSION}" '.name == "SelfRelay" and .version == $version and .manifest_version == 3' chrome-manifest.json
+          unzip -Z1 release-verify/SelfRelay-Chrome.zip | grep -qx 'background.js'
+          unzip -Z1 release-verify/SelfRelay-Chrome.zip | grep -qx 'vendor/whisper/ggml-base-q5_1.bin'
+
+      - name: Record verified CoderCup Release state in repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          WINDOWS_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SelfRelay-Setup.exe"
+          CHROME_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/SelfRelay-Chrome.zip"
+          WINDOWS_SIZE=$(stat -c%s release-verify/SelfRelay-Setup.exe)
+          CHROME_SIZE=$(stat -c%s release-verify/SelfRelay-Chrome.zip)
+          CHROME_SHA256=$(sha256sum release-verify/SelfRelay-Chrome.zip | awk '{print $1}')
+          mkdir -p docs
+          cat > docs/CODERCUP_RELEASE_STATUS.md <<EOF
+          # CoderCup Release verification
+
+          This file is generated only after GitHub Actions publishes and re-downloads the public release assets successfully.
+
+          - Release: ${RELEASE_URL}
+          - Windows: ${WINDOWS_URL}
+          - Windows version: 0.2.2
+          - Windows SHA-256: ${INSTALLER_SHA256}
+          - Windows size: ${WINDOWS_SIZE} bytes
+          - Chrome: ${CHROME_URL}
+          - Chrome version verified from packaged manifest: ${CHROME_VERSION}
+          - Chrome SHA-256: ${CHROME_SHA256}
+          - Chrome size: ${CHROME_SIZE} bytes
+          - Verification commit: ${GITHUB_SHA}
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/CODERCUP_RELEASE_STATUS.md
+          git commit -m 'Record verified CoderCup release assets'
+          git push
