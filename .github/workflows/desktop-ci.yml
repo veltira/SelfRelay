@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "desktop/**"
+      - "final/**"
     paths:
       - "apps/desktop/**"
       - ".github/workflows/desktop-ci.yml"
