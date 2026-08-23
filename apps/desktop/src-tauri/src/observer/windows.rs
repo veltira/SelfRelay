@@ -14,7 +14,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use ::windows::{core::{BOOL, PWSTR}, Win32::{
-    Foundation::{CloseHandle, HWND, LPARAM},
+    Foundation::{CloseHandle, HWND, LPARAM, ERROR_INSUFFICIENT_BUFFER},
+    Storage::Packaging::Appx::{GetApplicationUserModelId, GetPackageFamilyName},
     System::Threading::{GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
     UI::{
         Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
@@ -98,10 +99,8 @@ pub(super) fn start(
                         {
                             engine_notify();
                             if event.event == EVENT_OBJECT_DESTROY {
-                                // Lifecycle exit detection intentionally waits through a short
-                                // native-window recreation grace. A delayed notification matures
-                                // that pending exit without doing a global EnumWindows reconcile;
-                                // the latter would incorrectly drop minimized windows.
+                                // Mature a native exit after the recreation grace without doing a
+                                // global EnumWindows reconcile, which could misclassify minimized apps.
                                 let delayed_notify = Arc::clone(&engine_notify);
                                 thread::spawn(move || {
                                     thread::sleep(Duration::from_millis(EXIT_GRACE_MS + 75));
@@ -170,8 +169,6 @@ fn apply_event(registry: &WindowRegistry, event: RawWinEvent) -> bool {
         return false;
     }
 
-    // A hide/minimize is not a real context exit. Only destruction removes a
-    // top-level window from the lifecycle registry.
     if event.event == EVENT_OBJECT_HIDE {
         return false;
     }
@@ -277,7 +274,7 @@ unsafe fn inspect_window(hwnd: HWND) -> Option<WindowMetadata> {
 
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    let executable_path = process_path(pid);
+    let (executable_path, package_family_name, app_user_model_id) = process_details(pid);
     let executable_name = executable_path
         .as_deref()
         .and_then(|value| Path::new(value).file_name())
@@ -290,6 +287,8 @@ unsafe fn inspect_window(hwnd: HWND) -> Option<WindowMetadata> {
         pid,
         executable_path,
         executable_name,
+        package_family_name,
+        app_user_model_id,
         raw_title,
         visible,
         is_top_level,
@@ -299,22 +298,57 @@ unsafe fn inspect_window(hwnd: HWND) -> Option<WindowMetadata> {
     })
 }
 
-unsafe fn process_path(pid: u32) -> Option<String> {
+unsafe fn process_details(pid: u32) -> (Option<String>, Option<String>, Option<String>) {
     if pid == 0 {
-        return None;
+        return (None, None, None);
     }
-    let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-    let mut buffer = vec![0u16; 32768];
-    let mut size = buffer.len() as u32;
-    let result = QueryFullProcessImageNameW(
+    let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+        return (None, None, None);
+    };
+
+    let mut path_buffer = vec![0u16; 32768];
+    let mut path_size = path_buffer.len() as u32;
+    let path = QueryFullProcessImageNameW(
         process,
         PROCESS_NAME_WIN32,
-        PWSTR(buffer.as_mut_ptr()),
-        &mut size,
-    );
+        PWSTR(path_buffer.as_mut_ptr()),
+        &mut path_size,
+    )
+    .ok()
+    .map(|_| String::from_utf16_lossy(&path_buffer[..path_size as usize]));
+
+    let package_family_name = package_family_name(process);
+    let app_user_model_id = app_user_model_id(process);
     let _ = CloseHandle(process);
-    result.ok()?;
-    Some(String::from_utf16_lossy(&buffer[..size as usize]))
+    (path, package_family_name, app_user_model_id)
+}
+
+unsafe fn package_family_name(process: ::windows::Win32::Foundation::HANDLE) -> Option<String> {
+    let mut length = 0u32;
+    if GetPackageFamilyName(process, &mut length, None) != ERROR_INSUFFICIENT_BUFFER || length == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let status = GetPackageFamilyName(process, &mut length, Some(PWSTR(buffer.as_mut_ptr())));
+    if status.0 != 0 {
+        return None;
+    }
+    let end = buffer.iter().position(|value| *value == 0).unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..end]))
+}
+
+unsafe fn app_user_model_id(process: ::windows::Win32::Foundation::HANDLE) -> Option<String> {
+    let mut length = 0u32;
+    if GetApplicationUserModelId(process, &mut length, None) != ERROR_INSUFFICIENT_BUFFER || length == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let status = GetApplicationUserModelId(process, &mut length, Some(PWSTR(buffer.as_mut_ptr())));
+    if status.0 != 0 {
+        return None;
+    }
+    let end = buffer.iter().position(|value| *value == 0).unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
 fn now_ms() -> u64 {
