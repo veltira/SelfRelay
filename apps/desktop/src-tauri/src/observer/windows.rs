@@ -1,7 +1,18 @@
 use super::{ChangeNotifier, ObserverCommand, ObserverHandle, WindowRegistry};
-use crate::{adapters::derive_context, classification::classify_window, model::{WindowMetadata, WindowRecord}};
+use crate::{
+    adapters::derive_context,
+    classification::classify_window,
+    lifecycle::EXIT_GRACE_MS,
+    model::{WindowMetadata, WindowRecord},
+};
 use crossbeam_channel::{bounded, select, unbounded, Sender};
-use std::{ffi::c_void, path::Path, sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex, OnceLock}, thread, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    ffi::c_void,
+    path::Path,
+    sync::{atomic::{AtomicBool, AtomicU32, Ordering}, Arc, Mutex, OnceLock},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use ::windows::{core::{BOOL, PWSTR}, Win32::{
     Foundation::{CloseHandle, HWND, LPARAM},
     System::Threading::{GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
@@ -86,6 +97,17 @@ pub(super) fn start(
                             && apply_event(&engine_registry, event)
                         {
                             engine_notify();
+                            if event.event == EVENT_OBJECT_DESTROY {
+                                // Lifecycle exit detection intentionally waits through a short
+                                // native-window recreation grace. A delayed notification matures
+                                // that pending exit without doing a global EnumWindows reconcile;
+                                // the latter would incorrectly drop minimized windows.
+                                let delayed_notify = Arc::clone(&engine_notify);
+                                thread::spawn(move || {
+                                    thread::sleep(Duration::from_millis(EXIT_GRACE_MS + 75));
+                                    delayed_notify();
+                                });
+                            }
                         }
                     }
                     Err(_) => break,
@@ -148,14 +170,17 @@ fn apply_event(registry: &WindowRegistry, event: RawWinEvent) -> bool {
         return false;
     }
 
-    // A hide/minimize is not a real context exit. Only destruction removes the
-    // top-level window from the registry for checkpoint lifecycle purposes.
+    // A hide/minimize is not a real context exit. Only destruction removes a
+    // top-level window from the lifecycle registry.
     if event.event == EVENT_OBJECT_HIDE {
         return false;
     }
 
     if event.event == EVENT_OBJECT_DESTROY {
-        return registry.lock().map(|mut map| map.remove(&event.hwnd).is_some()).unwrap_or(false);
+        return registry
+            .lock()
+            .map(|mut map| map.remove(&event.hwnd).is_some())
+            .unwrap_or(false);
     }
 
     if event.event == EVENT_OBJECT_CREATE
@@ -184,21 +209,30 @@ fn reconcile_registry(registry: &WindowRegistry) {
 fn upsert_window(registry: &WindowRegistry, hwnd_value: isize) -> bool {
     let hwnd = HWND(hwnd_value as *mut c_void);
     let Some(metadata) = (unsafe { inspect_window(hwnd) }) else {
-        return registry.lock().map(|mut map| map.remove(&hwnd_value).is_some()).unwrap_or(false);
+        return registry
+            .lock()
+            .map(|mut map| map.remove(&hwnd_value).is_some())
+            .unwrap_or(false);
     };
     if classify_window(&metadata).is_err() {
-        return registry.lock().map(|mut map| map.remove(&hwnd_value).is_some()).unwrap_or(false);
+        return registry
+            .lock()
+            .map(|mut map| map.remove(&hwnd_value).is_some())
+            .unwrap_or(false);
     }
     let context = derive_context(&metadata);
     let record = WindowRecord { metadata, context };
-    registry.lock().map(|mut map| {
-        let changed = map.get(&hwnd_value) != Some(&record);
-        map.insert(hwnd_value, record);
-        changed
-    }).unwrap_or(false)
+    registry
+        .lock()
+        .map(|mut map| {
+            let changed = map.get(&hwnd_value) != Some(&record);
+            map.insert(hwnd_value, record);
+            changed
+        })
+        .unwrap_or(false)
 }
 
-fn snapshot_windows() -> Vec<WindowMetadata> {
+pub(crate) fn snapshot_windows() -> Vec<WindowMetadata> {
     let mut windows = Vec::<WindowMetadata>::new();
     unsafe extern "system" fn callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let windows = &mut *(lparam.0 as *mut Vec<WindowMetadata>);
@@ -208,7 +242,10 @@ fn snapshot_windows() -> Vec<WindowMetadata> {
         BOOL(1)
     }
     unsafe {
-        let _ = EnumWindows(Some(callback), LPARAM((&mut windows as *mut Vec<WindowMetadata>) as isize));
+        let _ = EnumWindows(
+            Some(callback),
+            LPARAM((&mut windows as *mut Vec<WindowMetadata>) as isize),
+        );
     }
     windows
 }
