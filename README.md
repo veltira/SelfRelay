@@ -6,13 +6,39 @@ SelfRelay ayuda a retomar una tarea interrumpida sin perder el contexto mental d
 
 Proyecto presentado a **CoderCup AI 2026**.
 
-> **Enlace único del proyecto para CoderCup:** esta misma página (`https://github.com/veltira/SelfRelay`). Desde aquí el jurado puede entender el proyecto, descargar la aplicación nativa para Windows o la extensión de Chrome y consultar las instrucciones de prueba. No hace falta entregar un enlace distinto por plataforma.
+> **Enlace único del proyecto para CoderCup:** esta misma página (`https://github.com/veltira/SelfRelay`). Desde aquí el jurado puede entender el proyecto, descargar la extensión de Chrome o la aplicación nativa para Windows y consultar las instrucciones de prueba. No hace falta entregar un enlace distinto por plataforma.
+
+## Probar SelfRelay
+
+Para la evaluación recomendamos comenzar por la **extensión de Chrome**, que actualmente ofrece la experiencia más pulida del proyecto. La versión de Windows se mantiene disponible como implementación nativa complementaria.
+
+| **Chrome Extension — 0.4.3 · Recomendada** | **Windows Desktop — 0.2.3** |
+| --- | --- |
+| [**⬇ Descargar SelfRelay para Chrome (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Chrome.zip) | [**⬇ Descargar SelfRelay para Windows (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Windows-0.2.3.zip) |
+| Instalación manual desde `chrome://extensions` | [**⬇ Instalador directo (.exe)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Setup.exe) |
+
+[**Ver todos los archivos de la Release CoderCup 2026**](https://github.com/veltira/SelfRelay/releases/tag/codercup-2026)
+
+> Los evaluadores no necesitan descargar el código fuente ni compilar el proyecto.
+
+## Chrome — SelfRelay 0.4.3
+
+[**⬇ Descargar SelfRelay para Chrome (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Chrome.zip)
+
+1. Descargar y extraer `SelfRelay-Chrome.zip`.
+2. Abrir `chrome://extensions`.
+3. Activar **Modo desarrollador**.
+4. Elegir **Cargar descomprimida**.
+5. Seleccionar la carpeta extraída de SelfRelay.
+6. Abrir SelfRelay y seguir una pestaña, página o sitio.
+7. Salir o cerrar ese contexto y guardar un checkpoint en texto o audio.
+8. Volver al mismo contexto y comprobar que SelfRelay recupera el checkpoint pendiente.
+
+No requiere una cuenta, backend externo, API keys ni servicios de IA pagos.
 
 ## Windows — SelfRelay Desktop 0.2.3
 
-[**⬇ Descargar SelfRelay para Windows (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Windows-0.2.3.zip)
-
-[Descarga directa del instalador `.exe`](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Setup.exe)
+[**⬇ Descargar SelfRelay para Windows (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Windows-0.2.3.zip) · [**Descarga directa del instalador `.exe`**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Setup.exe)
 
 La aplicación de escritorio lleva el concepto de SelfRelay a aplicaciones nativas de Windows. Permite elegir qué aplicaciones seguir, detectar cuándo se abandona el último contexto de una aplicación, guardar un checkpoint en texto o audio y recuperarlo cuando el usuario vuelve.
 
@@ -36,25 +62,6 @@ SHA-256 del instalador público verificado:
 `0e5ac37d05e719df464928c1a9b2da9aed26c429deca39d541397bc67bb8d91c`
 
 La captura de escritorio utiliza una breve ventana de estabilización antes de considerar que una aplicación realmente terminó. Esa demora evita confundir recreaciones internas de ventanas con cierres reales.
-
-## Chrome — SelfRelay 0.4.3
-
-[**⬇ Descargar SelfRelay para Chrome (.zip)**](https://github.com/veltira/SelfRelay/releases/download/codercup-2026/SelfRelay-Chrome.zip)
-
-1. Descargar y extraer `SelfRelay-Chrome.zip`.
-2. Abrir `chrome://extensions`.
-3. Activar **Modo desarrollador**.
-4. Elegir **Cargar descomprimida**.
-5. Seleccionar la carpeta extraída de SelfRelay.
-6. Abrir SelfRelay y seguir una pestaña, página o sitio.
-7. Salir o cerrar ese contexto y guardar un checkpoint en texto o audio.
-8. Volver al mismo contexto y comprobar que SelfRelay recupera el checkpoint pendiente.
-
-No requiere una cuenta, backend externo, API keys ni servicios de IA pagos.
-
-También se pueden consultar todos los archivos publicados en la [Release de CoderCup 2026](https://github.com/veltira/SelfRelay/releases/tag/codercup-2026).
-
-> Los evaluadores no necesitan descargar el código fuente ni compilar el proyecto.
 
 ## Para el jurado de CoderCup
 
