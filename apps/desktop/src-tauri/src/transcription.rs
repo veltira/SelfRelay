@@ -1,9 +1,18 @@
 use hound::{SampleFormat, WavReader};
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+};
 use whisper_rs::{
     convert_integer_to_float_audio, FullParams, SamplingStrategy, WhisperContext,
     WhisperContextParameters,
 };
+
+// Keep transcription deliberately conservative. SelfRelay is a background
+// productivity tool; local speech recognition must never monopolize the PC.
+const WHISPER_THREAD_LIMIT: i32 = 1;
+static TRANSCRIPTION_GATE: OnceLock<Mutex<()>> = OnceLock::new();
+static MODEL_CACHE: OnceLock<Mutex<Option<(PathBuf, Arc<WhisperContext>)>>> = OnceLock::new();
 
 pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> Result<String, String> {
     if !audio_path.is_file() {
@@ -17,6 +26,14 @@ pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> R
     if !model.is_file() {
         return Err("El modelo local de transcripción no está disponible en esta instalación.".into());
     }
+
+    // Never run two Whisper jobs at once. Each state owns sizeable compute
+    // buffers, so concurrent jobs can otherwise force low-memory Windows PCs
+    // into paging and make the whole desktop appear frozen.
+    let _transcription_guard = TRANSCRIPTION_GATE
+        .get_or_init(|| Mutex::new(()))
+        .try_lock()
+        .map_err(|_| "Ya hay una transcripción local en curso. Esperá a que termine antes de iniciar otra.".to_string())?;
 
     let mut reader = WavReader::open(audio_path)
         .map_err(|error| format!("No se pudo leer la nota de voz: {error}"))?;
@@ -43,17 +60,43 @@ pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> R
 
     // Whisper is linked directly into SelfRelay. There is deliberately no
     // whisper-cli.exe, cmd.exe, PowerShell or other child process involved.
-    let model_path = model.to_string_lossy();
-    let context = WhisperContext::new_with_params(
-        model_path.as_ref(),
-        WhisperContextParameters::default(),
-    )
-    .map_err(|error| format!("No se pudo cargar Whisper local: {error}"))?;
+    // Cache the immutable model context after the first use so repeated notes
+    // do not reread the model from disk every time.
+    let context = {
+        let cache = MODEL_CACHE.get_or_init(|| Mutex::new(None));
+        let mut cache = cache
+            .lock()
+            .map_err(|_| "No se pudo acceder al modelo local de transcripción.".to_string())?;
+        if let Some((cached_path, cached_context)) = cache.as_ref() {
+            if cached_path == &model {
+                Arc::clone(cached_context)
+            } else {
+                let loaded = Arc::new(
+                    WhisperContext::new_with_params(&model, WhisperContextParameters::default())
+                        .map_err(|error| format!("No se pudo cargar Whisper local: {error}"))?,
+                );
+                *cache = Some((model.clone(), Arc::clone(&loaded)));
+                loaded
+            }
+        } else {
+            let loaded = Arc::new(
+                WhisperContext::new_with_params(&model, WhisperContextParameters::default())
+                    .map_err(|error| format!("No se pudo cargar Whisper local: {error}"))?,
+            );
+            *cache = Some((model.clone(), Arc::clone(&loaded)));
+            loaded
+        }
+    };
+
     let mut state = context
         .create_state()
         .map_err(|error| format!("No se pudo iniciar Whisper local: {error}"))?;
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    // A single decoder thread keeps transcription responsive on modest PCs;
+    // the Tauri command already runs this blocking work off the UI thread.
+    params.set_n_threads(WHISPER_THREAD_LIMIT);
+    params.set_no_context(true);
     // language=None requests automatic language selection while still running
     // the full transcription pipeline. Do not enable detect_language: upstream
     // whisper.cpp treats that flag as detection-only and returns before text
@@ -89,6 +132,11 @@ pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> R
 mod tests {
     use super::*;
     use std::{env, path::PathBuf};
+
+    #[test]
+    fn transcription_is_resource_bounded() {
+        assert_eq!(WHISPER_THREAD_LIMIT, 1);
+    }
 
     #[test]
     fn missing_audio_fails_before_model_load() {
