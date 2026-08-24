@@ -54,8 +54,11 @@ pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> R
         .map_err(|error| format!("No se pudo iniciar Whisper local: {error}"))?;
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    // language=None requests automatic language selection while still running
+    // the full transcription pipeline. Do not enable detect_language: upstream
+    // whisper.cpp treats that flag as detection-only and returns before text
+    // segments are produced.
     params.set_language(None);
-    params.set_detect_language(true);
     params.set_translate(false);
     params.set_print_special(false);
     params.set_print_progress(false);
@@ -69,7 +72,7 @@ pub fn transcribe(audio_path: &Path, resource_dir: &Path, _work_dir: &Path) -> R
 
     let text = state
         .as_iter()
-        .map(|segment| segment.to_string())
+        .filter_map(|segment| segment.to_str_lossy().ok().map(|text| text.into_owned()))
         .collect::<Vec<_>>()
         .join(" ")
         .split_whitespace()
